@@ -59,25 +59,8 @@ c.copy()
 jwt 的通常传输格式 Authorization: Bearer aaa.bbb.ccc
 
 
-HTTP/2（推送，甚至嵌入数据）
 中间件（Accesslog、Basicauth、CORS、gRPC、Anti-Bot hCaptcha、JWT、MethodOverride、ModRevision、Monitor、PPROF、Ratelimit、Anti-Bot reCaptcha、Recovery、RequestID、Rewrite）
-API版本控制
-模型-视图-控制器
-网络套接字
-远程过程调用
-自动HTTPS
-具有动态路径作为参数的独特路由器，具有标准类型，例如：uuid、：string、：int...以及创建您自己的能力
-压缩
-创建您自己的文件服务器并托管您自己的 WebDAV 服务器
-缓存
-本地化（i18n、站点地图）
-会议
-丰富的响应（HTML、文本、Markdown、XML、YAML、二进制、JSON、JSONP、协议缓冲区、MessagePack、内容协商、流式传输、服务器发送的事件等）
+响应（文本、Markdown、XML、YAML、二进制、JSON、JSONP、协议缓冲区、MessagePack、内容协商、stream、sse等）
 响应压缩（gzip、deflate、brotli、snappy、s2）
 丰富的请求（绑定 URL 查询、标头、表单、文本、XML、YAML、二进制、JSON、验证、协议缓冲区、MessagePack 等）
-依赖注入（MVC、处理程序、API 路由器）
-测试套件
 
-
-
-路由参数问题
