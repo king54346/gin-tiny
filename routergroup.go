@@ -195,8 +195,7 @@ func (group *RouterGroup) Static(relativePath, root string) IRoutes {
 	return group.StaticFS(relativePath, Dir(root, false))
 }
 
-// StaticFS works just like `Static()` but a custom `http.FileSystem` can be used instead.
-// Gin by default uses: gin.Dir()
+// 不是为一个物理目录服务，而是为 http.FileSystem 接口提供服务。这是一个更灵活的方法，允许你为内存中的文件、嵌入的文件或其他实现了 http.FileSystem 接口的资源提供服务
 func (group *RouterGroup) StaticFS(relativePath string, fs http.FileSystem) IRoutes {
 	if strings.Contains(relativePath, ":") || strings.Contains(relativePath, "*") {
 		panic("URL parameters can not be used when serving a static folder")
