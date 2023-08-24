@@ -160,6 +160,80 @@ func (group *RouterGroup) Match(methods []string, relativePath string, handlers 
 	return group.returnObj()
 }
 
+func (group *RouterGroup) StaticFile(relativePath, filepath string) IRoutes {
+	return group.staticFileHandler(relativePath, func(c *Context) {
+		c.File(filepath)
+	})
+}
+
+// StaticFileFS works just like `StaticFile` but a custom `http.FileSystem` can be used instead..
+// router.StaticFileFS("favicon.ico", "./resources/favicon.ico", Dir{".", false})
+// Gin by default uses: gin.Dir()
+func (group *RouterGroup) StaticFileFS(relativePath, filepath string, fs http.FileSystem) IRoutes {
+	return group.staticFileHandler(relativePath, func(c *Context) {
+		c.FileFromFS(filepath, fs)
+	})
+}
+
+func (group *RouterGroup) staticFileHandler(relativePath string, handler HandlerFunc) IRoutes {
+	if strings.Contains(relativePath, ":") || strings.Contains(relativePath, "*") {
+		panic("URL parameters can not be used when serving a static file")
+	}
+	group.GET(relativePath, handler)
+	group.HEAD(relativePath, handler)
+	return group.returnObj()
+}
+
+// Static serves files from the given file system root.
+// Internally a http.FileServer is used, therefore http.NotFound is used instead
+// of the Router's NotFound handler.
+// To use the operating system's file system implementation,
+// use :
+//
+//	router.Static("/static", "/var/www")
+func (group *RouterGroup) Static(relativePath, root string) IRoutes {
+	return group.StaticFS(relativePath, Dir(root, false))
+}
+
+// StaticFS works just like `Static()` but a custom `http.FileSystem` can be used instead.
+// Gin by default uses: gin.Dir()
+func (group *RouterGroup) StaticFS(relativePath string, fs http.FileSystem) IRoutes {
+	if strings.Contains(relativePath, ":") || strings.Contains(relativePath, "*") {
+		panic("URL parameters can not be used when serving a static folder")
+	}
+	handler := group.createStaticHandler(relativePath, fs)
+	urlPattern := path.Join(relativePath, "/*filepath")
+
+	// Register GET and HEAD handlers
+	group.GET(urlPattern, handler)
+	group.HEAD(urlPattern, handler)
+	return group.returnObj()
+}
+
+func (group *RouterGroup) createStaticHandler(relativePath string, fs http.FileSystem) HandlerFunc {
+	absolutePath := group.calculateAbsolutePath(relativePath)
+	fileServer := http.StripPrefix(absolutePath, http.FileServer(fs))
+
+	return func(c *Context) {
+		if _, noListing := fs.(*onlyFilesFS); noListing {
+			c.Writer.WriteHeader(http.StatusNotFound)
+		}
+
+		file := c.Param("filepath")
+		// Check if file exists and/or if we have permission to access it
+		f, err := fs.Open(file)
+		if err != nil {
+			c.Writer.WriteHeader(http.StatusNotFound)
+			c.handlers = group.engine.noRoute
+			// Reset index
+			c.index = -1
+			return
+		}
+		f.Close()
+
+		fileServer.ServeHTTP(c.Writer, c.Request)
+	}
+}
 func (group *RouterGroup) combineHandlers(handlers HandlersChain) HandlersChain {
 	finalSize := len(group.Handlers) + len(handlers)
 	assert1(finalSize < int(abortIndex), "too many handlers")
