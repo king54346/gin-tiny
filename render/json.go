@@ -46,9 +46,9 @@ type PureJSON struct {
 }
 
 var (
-	jsonContentType      = []string{"application/json; charset=utf-8"}
-	jsonpContentType     = []string{"application/javascript; charset=utf-8"}
-	jsonASCIIContentType = []string{"application/json"}
+	jsonContentType      = []string{MIMEApplicationJSON}
+	jsonpContentType     = []string{MIMEApplicationJavaScriptCharsetUTF8}
+	jsonASCIIContentType = []string{MIMEApplicationJSON}
 )
 
 // Render (JSON) writes data with custom ContentType.

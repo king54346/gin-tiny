@@ -50,12 +50,14 @@ func (ps Params) ByName(name string) (va string) {
 
 // http的请求方法Get，Post等
 type methodTree struct {
-	method string
-	root   *node
+	method       string
+	root         *node
+	staticRouter map[string]HandlersChain //todo
 }
 
 type methodTrees []methodTree
 
+// 获取指定方法的路由树
 func (trees methodTrees) get(method string) *node {
 	for _, tree := range trees {
 		if tree.method == method {
@@ -114,15 +116,16 @@ const (
 	catchAll
 )
 
+// 路由树的节点
 type node struct {
 	path      string
 	indices   string // 子节点的path第一个字符拼接的字符串
 	wildChild bool
 	nType     nodeType
-	priority  uint32  //后继节点数
-	children  []*node // 路径更多的节点排在前面
-	handlers  HandlersChain
-	fullPath  string //path拼接上面前缀后的完整路径
+	priority  uint32        //后继节点数
+	children  []*node       // 路径更多的节点排在前面
+	handlers  HandlersChain // 处理程序链
+	fullPath  string        //path拼接上面前缀后的完整路径
 }
 
 // Increments priority of the given child and reorders if necessary
@@ -148,8 +151,7 @@ func (n *node) incrementChildPrio(pos int) int {
 	return newPos
 }
 
-// addRoute adds a node with the given handle to the path.
-// Not concurrency-safe!
+// addRoute方法将一个节点添加到路由树中，路径为path，处理程序为handlers
 func (n *node) addRoute(path string, handlers HandlersChain) {
 	fullPath := path
 	n.priority++

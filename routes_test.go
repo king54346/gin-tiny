@@ -33,10 +33,10 @@ func testRouteOK(method string, t *testing.T) {
 	passed := false
 	passedAny := false
 	r := New()
-	r.Any("/test2", func(c *Context) {
+	r.Any("/test2", func(c *context) {
 		passedAny = true
 	})
-	r.Handle(method, "/test", func(c *Context) {
+	r.Handle(method, "/test", func(c *context) {
 		passed = true
 	})
 
@@ -52,7 +52,7 @@ func testRouteOK(method string, t *testing.T) {
 func testRouteNotOK(method string, t *testing.T) {
 	passed := false
 	router := New()
-	router.Handle(method, "/test_2", func(c *Context) {
+	router.Handle(method, "/test_2", func(c *context) {
 		passed = true
 	})
 
@@ -73,7 +73,7 @@ func testRouteNotOK2(method string, t *testing.T) {
 	} else {
 		methodRoute = http.MethodPost
 	}
-	router.Handle(methodRoute, "/test", func(c *Context) {
+	router.Handle(methodRoute, "/test", func(c *context) {
 		passed = true
 	})
 
@@ -85,15 +85,15 @@ func testRouteNotOK2(method string, t *testing.T) {
 
 func TestRouterMethod(t *testing.T) {
 	router := New()
-	router.PUT("/hey2", func(c *Context) {
+	router.PUT("/hey2", func(c *context) {
 		c.String(http.StatusOK, "sup2")
 	})
 
-	router.PUT("/hey", func(c *Context) {
+	router.PUT("/hey", func(c *context) {
 		c.String(http.StatusOK, "called")
 	})
 
-	router.PUT("/hey3", func(c *Context) {
+	router.PUT("/hey3", func(c *context) {
 		c.String(http.StatusOK, "sup3")
 	})
 
@@ -143,10 +143,10 @@ func TestRouteRedirectTrailingSlash(t *testing.T) {
 	router := New()
 	router.RedirectFixedPath = false
 	router.RedirectTrailingSlash = true
-	router.GET("/path", func(c *Context) {})
-	router.GET("/path2/", func(c *Context) {})
-	router.POST("/path3", func(c *Context) {})
-	router.PUT("/path4/", func(c *Context) {})
+	router.GET("/path", func(c *context) {})
+	router.GET("/path2/", func(c *context) {})
+	router.POST("/path3", func(c *context) {})
+	router.PUT("/path4/", func(c *context) {})
 
 	w := PerformRequest(router, http.MethodGet, "/path/")
 	assert.Equal(t, "/path", w.Header().Get("Location"))
@@ -248,10 +248,10 @@ func TestRouteRedirectFixedPath(t *testing.T) {
 	router.RedirectFixedPath = true
 	router.RedirectTrailingSlash = false
 
-	router.GET("/path", func(c *Context) {})
-	router.GET("/Path2", func(c *Context) {})
-	router.POST("/PATH3", func(c *Context) {})
-	router.POST("/Path4/", func(c *Context) {})
+	router.GET("/path", func(c *context) {})
+	router.GET("/Path2", func(c *context) {})
+	router.POST("/PATH3", func(c *context) {})
+	router.POST("/Path4/", func(c *context) {})
 
 	w := PerformRequest(router, http.MethodGet, "/PATH")
 	assert.Equal(t, "/path", w.Header().Get("Location"))
@@ -276,7 +276,7 @@ func TestRouteParamsByName(t *testing.T) {
 	lastName := ""
 	wild := ""
 	router := New()
-	router.GET("/test/:name/:last_name/*wild", func(c *Context) {
+	router.GET("/test/:name/:last_name/*wild", func(c *context) {
 		name = c.Params.ByName("name")
 		lastName = c.Params.ByName("last_name")
 		var ok bool
@@ -309,7 +309,7 @@ func TestRouteParamsByNameWithExtraSlash(t *testing.T) {
 	wild := ""
 	router := New()
 	router.RemoveExtraSlash = true
-	router.GET("/test/:name/:last_name/*wild", func(c *Context) {
+	router.GET("/test/:name/:last_name/*wild", func(c *context) {
 		name = c.Params.ByName("name")
 		lastName = c.Params.ByName("last_name")
 		var ok bool
@@ -338,11 +338,11 @@ func TestRouteParamsByNameWithExtraSlash(t *testing.T) {
 func TestRouteNotAllowedEnabled(t *testing.T) {
 	router := New()
 	router.HandleMethodNotAllowed = true
-	router.POST("/path", func(c *Context) {})
+	router.POST("/path", func(c *context) {})
 	w := PerformRequest(router, http.MethodGet, "/path")
 	assert.Equal(t, http.StatusMethodNotAllowed, w.Code)
 
-	router.NoMethod(func(c *Context) {
+	router.NoMethod(func(c *context) {
 		c.String(http.StatusTeapot, "responseText")
 	})
 	w = PerformRequest(router, http.MethodGet, "/path")
@@ -354,8 +354,8 @@ func TestRouteNotAllowedEnabled2(t *testing.T) {
 	router := New()
 	router.HandleMethodNotAllowed = true
 	// add one methodTree to trees
-	router.addRoute(http.MethodPost, "/", HandlersChain{func(_ *Context) {}})
-	router.GET("/path2", func(c *Context) {})
+	router.addRoute(http.MethodPost, "/", HandlersChain{func(_ *context) {}})
+	router.GET("/path2", func(c *context) {})
 	w := PerformRequest(router, http.MethodPost, "/path2")
 	assert.Equal(t, http.StatusMethodNotAllowed, w.Code)
 }
@@ -363,11 +363,11 @@ func TestRouteNotAllowedEnabled2(t *testing.T) {
 func TestRouteNotAllowedDisabled(t *testing.T) {
 	router := New()
 	router.HandleMethodNotAllowed = false
-	router.POST("/path", func(c *Context) {})
+	router.POST("/path", func(c *context) {})
 	w := PerformRequest(router, http.MethodGet, "/path")
 	assert.Equal(t, http.StatusNotFound, w.Code)
 
-	router.NoMethod(func(c *Context) {
+	router.NoMethod(func(c *context) {
 		c.String(http.StatusTeapot, "responseText")
 	})
 	w = PerformRequest(router, http.MethodGet, "/path")
@@ -378,8 +378,8 @@ func TestRouteNotAllowedDisabled(t *testing.T) {
 func TestRouterNotFoundWithRemoveExtraSlash(t *testing.T) {
 	router := New()
 	router.RemoveExtraSlash = true
-	router.GET("/path", func(c *Context) {})
-	router.GET("/", func(c *Context) {})
+	router.GET("/path", func(c *context) {})
+	router.GET("/", func(c *context) {})
 
 	testRoutes := []struct {
 		route    string
@@ -401,9 +401,9 @@ func TestRouterNotFoundWithRemoveExtraSlash(t *testing.T) {
 func TestRouterNotFound(t *testing.T) {
 	router := New()
 	router.RedirectFixedPath = true
-	router.GET("/path", func(c *Context) {})
-	router.GET("/dir/", func(c *Context) {})
-	router.GET("/", func(c *Context) {})
+	router.GET("/path", func(c *context) {})
+	router.GET("/dir/", func(c *context) {})
+	router.GET("/", func(c *context) {})
 
 	testRoutes := []struct {
 		route    string
@@ -429,7 +429,7 @@ func TestRouterNotFound(t *testing.T) {
 
 	// Test custom not found handler
 	var notFound bool
-	router.NoRoute(func(c *Context) {
+	router.NoRoute(func(c *context) {
 		c.AbortWithStatus(http.StatusNotFound)
 		notFound = true
 	})
@@ -438,25 +438,25 @@ func TestRouterNotFound(t *testing.T) {
 	assert.True(t, notFound)
 
 	// Test other method than GET (want 307 instead of 301)
-	router.PATCH("/path", func(c *Context) {})
+	router.PATCH("/path", func(c *context) {})
 	w = PerformRequest(router, http.MethodPatch, "/path/")
 	assert.Equal(t, http.StatusTemporaryRedirect, w.Code)
 	assert.Equal(t, "map[Location:[/path]]", fmt.Sprint(w.Header()))
 
 	// Test special case where no node for the prefix "/" exists
 	router = New()
-	router.GET("/a", func(c *Context) {})
+	router.GET("/a", func(c *context) {})
 	w = PerformRequest(router, http.MethodGet, "/")
 	assert.Equal(t, http.StatusNotFound, w.Code)
 
 	// Reproduction test for the bug of issue #2843
 	router = New()
-	router.NoRoute(func(c *Context) {
+	router.NoRoute(func(c *context) {
 		if c.Request.RequestURI == "/login" {
 			c.String(200, "login")
 		}
 	})
-	router.GET("/logout", func(c *Context) {
+	router.GET("/logout", func(c *context) {
 		c.String(200, "logout")
 	})
 	w = PerformRequest(router, http.MethodGet, "/login")
@@ -469,7 +469,7 @@ func TestRouteRawPath(t *testing.T) {
 	route := New()
 	route.UseRawPath = true
 
-	route.POST("/project/:name/build/:num", func(c *Context) {
+	route.POST("/project/:name/build/:num", func(c *context) {
 		name := c.Params.ByName("name")
 		num := c.Params.ByName("num")
 
@@ -489,7 +489,7 @@ func TestRouteRawPathNoUnescape(t *testing.T) {
 	route.UseRawPath = true
 	route.UnescapePathValues = false
 
-	route.POST("/project/:name/build/:num", func(c *Context) {
+	route.POST("/project/:name/build/:num", func(c *context) {
 		name := c.Params.ByName("name")
 		num := c.Params.ByName("num")
 
@@ -506,7 +506,7 @@ func TestRouteRawPathNoUnescape(t *testing.T) {
 
 func TestRouteServeErrorWithWriteHeader(t *testing.T) {
 	route := New()
-	route.Use(func(c *Context) {
+	route.Use(func(c *context) {
 		c.Status(421)
 		c.Next()
 	})
@@ -537,7 +537,7 @@ func TestRouteContextHoldsFullPath(t *testing.T) {
 
 	for _, route := range routes {
 		actualRoute := route
-		router.GET(route, func(c *Context) {
+		router.GET(route, func(c *context) {
 			// For each defined route context should contain its full path
 			assert.Equal(t, actualRoute, c.FullPath())
 			c.AbortWithStatus(http.StatusOK)
@@ -550,7 +550,7 @@ func TestRouteContextHoldsFullPath(t *testing.T) {
 	}
 
 	// Test not found
-	router.Use(func(c *Context) {
+	router.Use(func(c *context) {
 		// For not found routes full path is empty
 		assert.Equal(t, "", c.FullPath())
 	})

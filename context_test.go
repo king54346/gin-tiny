@@ -29,14 +29,14 @@ import (
 	"google.golang.org/protobuf/proto"
 )
 
-var _ context.Context = (*Context)(nil)
+var _ context.Context = (*context)(nil)
 
 var errTestRender = errors.New("TestRender")
 
 // Unit tests TODO
-// func (c *Context) File(filepath string) {
-// func (c *Context) Negotiate(code int, config Negotiate) {
-// BAD case: func (c *Context) Render(code int, render render.Render, obj ...any) {
+// func (c *context) File(filepath string) {
+// func (c *context) Negotiate(code int, config Negotiate) {
+// BAD case: func (c *context) Render(code int, render render.Render, obj ...any) {
 // test that information is not leaked when reusing Contexts (using the Pool)
 
 func createMultipartRequest() *http.Request {
@@ -177,8 +177,8 @@ func TestContextHandlers(t *testing.T) {
 	assert.NotNil(t, c.handlers)
 	assert.Nil(t, c.handlers.Last())
 
-	f := func(c *Context) {}
-	g := func(c *Context) {}
+	f := func(c *context) {}
+	g := func(c *context) {}
 
 	c.handlers = HandlersChain{f}
 	compareFunc(t, f, c.handlers.Last())
@@ -320,7 +320,7 @@ func TestContextCopy(t *testing.T) {
 	c, _ := CreateTestContext(httptest.NewRecorder())
 	c.index = 2
 	c.Request, _ = http.NewRequest("POST", "/hola", nil)
-	c.handlers = HandlersChain{func(c *Context) {}}
+	c.handlers = HandlersChain{func(c *context) {}}
 	c.Params = Params{Param{Key: "foo", Value: "bar"}}
 	c.Set("foo", "bar")
 
@@ -339,14 +339,14 @@ func TestContextCopy(t *testing.T) {
 
 func TestContextHandlerName(t *testing.T) {
 	c, _ := CreateTestContext(httptest.NewRecorder())
-	c.handlers = HandlersChain{func(c *Context) {}, handlerNameTest}
+	c.handlers = HandlersChain{func(c *context) {}, handlerNameTest}
 
 	assert.Regexp(t, "^(.*/vendor/)?gin-tiny.handlerNameTest$", c.HandlerName())
 }
 
 func TestContextHandlerNames(t *testing.T) {
 	c, _ := CreateTestContext(httptest.NewRecorder())
-	c.handlers = HandlersChain{func(c *Context) {}, handlerNameTest, func(c *Context) {}, handlerNameTest2}
+	c.handlers = HandlersChain{func(c *context) {}, handlerNameTest, func(c *context) {}, handlerNameTest2}
 
 	names := c.HandlerNames()
 
@@ -356,18 +356,18 @@ func TestContextHandlerNames(t *testing.T) {
 	}
 }
 
-func handlerNameTest(c *Context) {
+func handlerNameTest(c *context) {
 }
 
-func handlerNameTest2(c *Context) {
+func handlerNameTest2(c *context) {
 }
 
-var handlerTest HandlerFunc = func(c *Context) {
+var handlerTest HandlerFunc = func(c *context) {
 }
 
 func TestContextHandler(t *testing.T) {
 	c, _ := CreateTestContext(httptest.NewRecorder())
-	c.handlers = HandlersChain{func(c *Context) {}, handlerTest}
+	c.handlers = HandlersChain{func(c *context) {}, handlerTest}
 
 	assert.Equal(t, reflect.ValueOf(handlerTest).Pointer(), reflect.ValueOf(c.Handler()).Pointer())
 }
@@ -1498,7 +1498,7 @@ func TestContextClientIP(t *testing.T) {
 	assert.Empty(t, c.ClientIP())
 }
 
-func resetContextForClientIPTests(c *Context) {
+func resetContextForClientIPTests(c *context) {
 	c.Request.Header.Set("X-Real-IP", " 10.10.10.10  ")
 	c.Request.Header.Set("X-Forwarded-For", "  20.20.20.20, 30.30.30.30")
 	c.Request.Header.Set("X-Appengine-Remote-Addr", "50.50.50.50")
@@ -2047,7 +2047,7 @@ func TestContextResetInHandler(t *testing.T) {
 	c, _ := CreateTestContext(w)
 
 	c.handlers = []HandlerFunc{
-		func(c *Context) { c.reset() },
+		func(c *context) { c.reset() },
 	}
 	assert.NotPanics(t, func() {
 		c.Next()
@@ -2061,8 +2061,8 @@ func TestRaceParamsContextCopy(t *testing.T) {
 	var wg sync.WaitGroup
 	wg.Add(2)
 	{
-		nameGroup.GET("/api", func(c *Context) {
-			go func(c *Context, param string) {
+		nameGroup.GET("/api", func(c *context) {
+			go func(c *context, param string) {
 				defer wg.Done()
 				// First assert must be executed after the second request
 				time.Sleep(50 * time.Millisecond)
@@ -2076,7 +2076,7 @@ func TestRaceParamsContextCopy(t *testing.T) {
 }
 
 func TestContextWithKeysMutex(t *testing.T) {
-	c := &Context{}
+	c := &context{}
 	c.Set("foo", "bar")
 
 	value, err := c.Get("foo")
@@ -2110,7 +2110,7 @@ func TestHasRequestContext(t *testing.T) {
 	c.engine.ContextWithFallback = false
 	assert.False(t, c.hasRequestContext(), "has request, no fallback")
 
-	c = &Context{}
+	c = &context{}
 	assert.False(t, c.hasRequestContext(), "no request, no engine")
 	c.Request, _ = http.NewRequest(http.MethodGet, "/", nil)
 	assert.False(t, c.hasRequestContext(), "has request, no engine")
@@ -2181,12 +2181,12 @@ func TestContextWithFallbackValueFromRequestContext(t *testing.T) {
 
 	tests := []struct {
 		name             string
-		getContextAndKey func() (*Context, any)
+		getContextAndKey func() (*context, any)
 		value            any
 	}{
 		{
 			name: "c with struct context key",
-			getContextAndKey: func() (*Context, any) {
+			getContextAndKey: func() (*context, any) {
 				var key struct{}
 				c, _ := CreateTestContext(httptest.NewRecorder())
 				// enable ContextWithFallback feature flag
@@ -2199,7 +2199,7 @@ func TestContextWithFallbackValueFromRequestContext(t *testing.T) {
 		},
 		{
 			name: "c with string context key",
-			getContextAndKey: func() (*Context, any) {
+			getContextAndKey: func() (*context, any) {
 				c, _ := CreateTestContext(httptest.NewRecorder())
 				// enable ContextWithFallback feature flag
 				c.engine.ContextWithFallback = true
@@ -2211,7 +2211,7 @@ func TestContextWithFallbackValueFromRequestContext(t *testing.T) {
 		},
 		{
 			name: "c with nil http.Request",
-			getContextAndKey: func() (*Context, any) {
+			getContextAndKey: func() (*context, any) {
 				c, _ := CreateTestContext(httptest.NewRecorder())
 				// enable ContextWithFallback feature flag
 				c.engine.ContextWithFallback = true
@@ -2221,8 +2221,8 @@ func TestContextWithFallbackValueFromRequestContext(t *testing.T) {
 			value: nil,
 		},
 		{
-			name: "c with nil http.Request.Context()",
-			getContextAndKey: func() (*Context, any) {
+			name: "c with nil http.Request.context()",
+			getContextAndKey: func() (*context, any) {
 				c, _ := CreateTestContext(httptest.NewRecorder())
 				// enable ContextWithFallback feature flag
 				c.engine.ContextWithFallback = true
@@ -2251,7 +2251,7 @@ func TestContextCopyShouldNotCancel(t *testing.T) {
 	wg := &sync.WaitGroup{}
 
 	r := New()
-	r.GET("/", func(ginctx *Context) {
+	r.GET("/", func(ginctx *context) {
 		wg.Add(1)
 
 		ginctx = ginctx.Copy()
@@ -2305,7 +2305,7 @@ func TestContextCopyShouldNotCancel(t *testing.T) {
 }
 
 func TestContextAddParam(t *testing.T) {
-	c := &Context{}
+	c := &context{}
 	id := "id"
 	value := "1"
 	c.AddParam(id, value)
@@ -2318,7 +2318,7 @@ func TestContextAddParam(t *testing.T) {
 func TestCreateTestContextWithRouteParams(t *testing.T) {
 	w := httptest.NewRecorder()
 	engine := New()
-	engine.GET("/:action/:name", func(ctx *Context) {
+	engine.GET("/:action/:name", func(ctx *context) {
 		ctx.String(http.StatusOK, "%s %s", ctx.Param("action"), ctx.Param("name"))
 	})
 	c := CreateTestContextOnly(w, engine)
@@ -2343,7 +2343,7 @@ func TestInterceptedHeader(t *testing.T) {
 	w := httptest.NewRecorder()
 	c, r := CreateTestContext(w)
 
-	r.Use(func(c *Context) {
+	r.Use(func(c *context) {
 		i := interceptedWriter{
 			ResponseWriter: c.Writer,
 			b:              bytes.NewBuffer(nil),
@@ -2353,7 +2353,7 @@ func TestInterceptedHeader(t *testing.T) {
 		c.Header("X-Test", "overridden")
 		c.Writer = i.ResponseWriter
 	})
-	r.GET("/", func(c *Context) {
+	r.GET("/", func(c *context) {
 		c.Header("X-Test", "original")
 		c.Header("X-Test-2", "present")
 		c.String(http.StatusOK, "hello world")

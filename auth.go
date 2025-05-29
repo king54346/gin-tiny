@@ -47,9 +47,9 @@ func BasicAuthForRealm(accounts Accounts, realm string) HandlerFunc {
 	}
 	realm = "Basic realm=" + strconv.Quote(realm)
 	pairs := processAccounts(accounts)
-	return func(c *Context) {
+	return func(c Context) {
 		// Search user in the slice of allowed credentials
-		user, found := pairs.searchCredential(c.requestHeader("Authorization"))
+		user, found := pairs.searchCredential(c.RequestHeader("Authorization"))
 		if !found {
 			// Credentials doesn't match, we return 401 and abort handlers chain.
 			c.Header("WWW-Authenticate", realm)

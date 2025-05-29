@@ -15,7 +15,7 @@ type ProtoBuf struct {
 	Data any
 }
 
-var protobufContentType = []string{"application/x-protobuf"}
+var protobufContentType = []string{MIMEApplicationProtobuf}
 
 // Render (ProtoBuf) marshals the given interface object and writes data with custom ContentType.
 func (r ProtoBuf) Render(w http.ResponseWriter) error {

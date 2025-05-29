@@ -72,7 +72,7 @@ func NewAuthenticator(secretKeys Secrets, options ...Option) *Authenticator {
 
 // Authenticated returns a gin middleware which permits given permissions in parameter.
 func (a *Authenticator) Authenticated() gin.HandlerFunc {
-	return func(c *gin.Context) {
+	return func(c *gin.context) {
 		sigHeader, err := NewSignatureHeader(c.Request)
 		if err != nil {
 			_ = c.AbortWithError(http.StatusUnauthorized, err)

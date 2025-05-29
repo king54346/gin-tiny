@@ -6,14 +6,16 @@ package ginTiny
 
 import (
 	"net/http"
+	"path"
 	"regexp"
+	"strings"
 )
 
 var (
 	// regEnLetter matches english letters for http method name
 	regEnLetter = regexp.MustCompile("^[A-Z]+$")
 
-	// anyMethods for RouterGroup Any method
+	// anyMethods 包含所有 HTTP 方法
 	anyMethods = []string{
 		http.MethodGet, http.MethodPost, http.MethodPut, http.MethodPatch,
 		http.MethodHead, http.MethodOptions, http.MethodDelete, http.MethodConnect,
@@ -76,6 +78,7 @@ func (group *RouterGroup) BasePath() string {
 	return group.basePath
 }
 
+// HTTP 路由注册到框架的路由表中，并处理好路径和中间件的合并
 func (group *RouterGroup) handle(httpMethod, relativePath string, handlers HandlersChain) IRoutes {
 	// 计算绝对路径
 	absolutePath := group.calculateAbsolutePath(relativePath)
@@ -86,17 +89,7 @@ func (group *RouterGroup) handle(httpMethod, relativePath string, handlers Handl
 	return group.returnObj()
 }
 
-// todo
-// Handle registers a new request handle and middleware with the given path and method.
-// The last handler should be the real handler, the other ones should be middleware that can and should be shared among different routes.
-// See the example code in GitHub.
-//
-// For GET, POST, PUT, PATCH and DELETE requests the respective shortcut
-// functions can be used.
-//
-// This function is intended for bulk loading and to allow the usage of less
-// frequently used, non-standardized or custom methods (e.g. for internal
-// communication with a proxy).
+// Handle 方法用于注册一个新的请求处理器和中间件，指定路径和 HTTP 方法
 func (group *RouterGroup) Handle(httpMethod, relativePath string, handlers ...HandlerFunc) IRoutes {
 	if matched := regEnLetter.MatchString(httpMethod); !matched {
 		panic("http method " + httpMethod + " is not valid")
@@ -104,7 +97,7 @@ func (group *RouterGroup) Handle(httpMethod, relativePath string, handlers ...Ha
 	return group.handle(httpMethod, relativePath, handlers)
 }
 
-// POST is a shortcut for router.Handle("POST", path, handlers).
+// POST 是一个快捷方式，用于注册 POST 请求的处理函数。
 func (group *RouterGroup) POST(relativePath string, handlers ...HandlerFunc) IRoutes {
 	return group.handle(http.MethodPost, relativePath, handlers)
 }
@@ -139,9 +132,16 @@ func (group *RouterGroup) HEAD(relativePath string, handlers ...HandlerFunc) IRo
 	return group.handle(http.MethodHead, relativePath, handlers)
 }
 
-// Any registers a route that matches all the HTTP methods.
-// GET, POST, PUT, PATCH, HEAD, OPTIONS, DELETE, CONNECT, TRACE.
+// Any 方法让同一路径支持所有 HTTP 请求方式。
 func (group *RouterGroup) Any(relativePath string, handlers ...HandlerFunc) IRoutes {
+	for _, method := range anyMethods {
+		group.handle(method, relativePath, handlers)
+	}
+
+	return group.returnObj()
+}
+
+func (group *RouterGroup) StaticRouter(relativePath string, handlers ...HandlerFunc) IRoutes {
 	for _, method := range anyMethods {
 		group.handle(method, relativePath, handlers)
 	}
@@ -161,7 +161,7 @@ func (group *RouterGroup) Match(methods []string, relativePath string, handlers 
 }
 
 func (group *RouterGroup) StaticFile(relativePath, filepath string) IRoutes {
-	return group.staticFileHandler(relativePath, func(c *Context) {
+	return group.staticFileHandler(relativePath, func(c Context) {
 		c.File(filepath)
 	})
 }
@@ -170,7 +170,7 @@ func (group *RouterGroup) StaticFile(relativePath, filepath string) IRoutes {
 // router.StaticFileFS("favicon.ico", "./resources/favicon.ico", Dir{".", false})
 // Gin by default uses: gin.Dir()
 func (group *RouterGroup) StaticFileFS(relativePath, filepath string, fs http.FileSystem) IRoutes {
-	return group.staticFileHandler(relativePath, func(c *Context) {
+	return group.staticFileHandler(relativePath, func(c Context) {
 		c.FileFromFS(filepath, fs)
 	})
 }
@@ -209,28 +209,18 @@ func (group *RouterGroup) StaticFS(relativePath string, fs http.FileSystem) IRou
 	return group.returnObj()
 }
 
+// 创建一个处理静态文件请求的处理函数（HandlerFunc）
+// 处理文件访问权限和文件存在性检查
+// 在文件不存在或无权限访问时提供优雅的错误处理
 func (group *RouterGroup) createStaticHandler(relativePath string, fs http.FileSystem) HandlerFunc {
 	absolutePath := group.calculateAbsolutePath(relativePath)
 	fileServer := http.StripPrefix(absolutePath, http.FileServer(fs))
 
-	return func(c *Context) {
+	return func(c Context) {
 		if _, noListing := fs.(*onlyFilesFS); noListing {
-			c.Writer.WriteHeader(http.StatusNotFound)
+			c.Response().WriteHeader(http.StatusNotFound)
 		}
-
-		file := c.Param("filepath")
-		// Check if file exists and/or if we have permission to access it
-		f, err := fs.Open(file)
-		if err != nil {
-			c.Writer.WriteHeader(http.StatusNotFound)
-			c.handlers = group.engine.noRoute
-			// Reset index
-			c.index = -1
-			return
-		}
-		f.Close()
-
-		fileServer.ServeHTTP(c.Writer, c.Request)
+		c.ServeStaticFile(fs, fileServer)
 	}
 }
 func (group *RouterGroup) combineHandlers(handlers HandlersChain) HandlersChain {

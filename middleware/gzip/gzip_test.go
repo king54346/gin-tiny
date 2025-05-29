@@ -51,11 +51,11 @@ func newServer() *gin.Engine {
 
 	router := gin.New()
 	router.Use(Gzip(DefaultCompression))
-	router.GET("/", func(c *gin.Context) {
+	router.GET("/", func(c *gin.context) {
 		c.Header("Content-Length", strconv.Itoa(len(testResponse)))
 		c.String(200, testResponse)
 	})
-	router.Any("/reverse", func(c *gin.Context) {
+	router.Any("/reverse", func(c *gin.context) {
 		rp.ServeHTTP(c.Writer, c.Request)
 	})
 	return router
@@ -90,7 +90,7 @@ func TestGzipPNG(t *testing.T) {
 
 	router := gin.New()
 	router.Use(Gzip(DefaultCompression))
-	router.GET("/image.png", func(c *gin.Context) {
+	router.GET("/image.png", func(c *gin.context) {
 		c.String(200, "this is a PNG!")
 	})
 
@@ -109,7 +109,7 @@ func TestExcludedExtensions(t *testing.T) {
 
 	router := gin.New()
 	router.Use(Gzip(DefaultCompression, WithExcludedExtensions([]string{".html"})))
-	router.GET("/index.html", func(c *gin.Context) {
+	router.GET("/index.html", func(c *gin.context) {
 		c.String(200, "this is a HTML!")
 	})
 
@@ -129,7 +129,7 @@ func TestExcludedPaths(t *testing.T) {
 
 	router := gin.New()
 	router.Use(Gzip(DefaultCompression, WithExcludedPaths([]string{"/api/"})))
-	router.GET("/api/books", func(c *gin.Context) {
+	router.GET("/api/books", func(c *gin.context) {
 		c.String(200, "this is books!")
 	})
 
@@ -193,7 +193,7 @@ func TestDecompressGzip(t *testing.T) {
 
 	router := gin.New()
 	router.Use(Gzip(DefaultCompression, WithDecompressFn(DefaultDecompressHandle)))
-	router.POST("/", func(c *gin.Context) {
+	router.POST("/", func(c *gin.context) {
 		if v := c.Request.Header.Get("Content-Encoding"); v != "" {
 			t.Errorf("unexpected `Content-Encoding`: %s header", v)
 		}
@@ -223,7 +223,7 @@ func TestDecompressGzipWithEmptyBody(t *testing.T) {
 
 	router := gin.New()
 	router.Use(Gzip(DefaultCompression, WithDecompressFn(DefaultDecompressHandle)))
-	router.POST("/", func(c *gin.Context) {
+	router.POST("/", func(c *gin.context) {
 		c.String(200, "ok")
 	})
 
@@ -243,7 +243,7 @@ func TestDecompressGzipWithIncorrectData(t *testing.T) {
 
 	router := gin.New()
 	router.Use(Gzip(DefaultCompression, WithDecompressFn(DefaultDecompressHandle)))
-	router.POST("/", func(c *gin.Context) {
+	router.POST("/", func(c *gin.context) {
 		c.String(200, "ok")
 	})
 

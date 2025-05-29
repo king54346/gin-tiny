@@ -65,7 +65,7 @@ func TestRunEmpty(t *testing.T) {
 	os.Setenv("PORT", "")
 	router := New()
 	go func() {
-		router.GET("/example", func(c *Context) { c.String(http.StatusOK, "it worked") })
+		router.GET("/example", func(c *context) { c.String(http.StatusOK, "it worked") })
 		assert.NoError(t, router.Run())
 	}()
 	// have to wait for the goroutine to start and run the server
@@ -98,7 +98,7 @@ func TestBadTrustedCIDRsForRunUnix(t *testing.T) {
 	defer os.Remove(unixTestSocket)
 
 	go func() {
-		router.GET("/example", func(c *Context) { c.String(http.StatusOK, "it worked") })
+		router.GET("/example", func(c *context) { c.String(http.StatusOK, "it worked") })
 		assert.Error(t, router.RunUnix(unixTestSocket))
 	}()
 	// have to wait for the goroutine to start and run the server
@@ -118,7 +118,7 @@ func TestBadTrustedCIDRsForRunFd(t *testing.T) {
 	assert.NoError(t, err)
 
 	go func() {
-		router.GET("/example", func(c *Context) { c.String(http.StatusOK, "it worked") })
+		router.GET("/example", func(c *context) { c.String(http.StatusOK, "it worked") })
 		assert.Error(t, router.RunFd(int(socketFile.Fd())))
 	}()
 	// have to wait for the goroutine to start and run the server
@@ -135,7 +135,7 @@ func TestBadTrustedCIDRsForRunListener(t *testing.T) {
 	listener, err := net.ListenTCP("tcp", addr)
 	assert.NoError(t, err)
 	go func() {
-		router.GET("/example", func(c *Context) { c.String(http.StatusOK, "it worked") })
+		router.GET("/example", func(c *context) { c.String(http.StatusOK, "it worked") })
 		assert.Error(t, router.RunListener(listener))
 	}()
 	// have to wait for the goroutine to start and run the server
@@ -154,7 +154,7 @@ func TestBadTrustedCIDRsForRunTLS(t *testing.T) {
 func TestRunTLS(t *testing.T) {
 	router := New()
 	go func() {
-		router.GET("/example", func(c *Context) { c.String(http.StatusOK, "it worked") })
+		router.GET("/example", func(c *context) { c.String(http.StatusOK, "it worked") })
 
 		assert.NoError(t, router.RunTLS(":8443", "./testdata/certificate/cert.pem", "./testdata/certificate/key.pem"))
 	}()
@@ -171,7 +171,7 @@ func TestRunEmptyWithEnv(t *testing.T) {
 	os.Setenv("PORT", "3123")
 	router := New()
 	go func() {
-		router.GET("/example", func(c *Context) { c.String(http.StatusOK, "it worked") })
+		router.GET("/example", func(c *context) { c.String(http.StatusOK, "it worked") })
 		assert.NoError(t, router.Run())
 	}()
 	// have to wait for the goroutine to start and run the server
@@ -192,7 +192,7 @@ func TestRunTooMuchParams(t *testing.T) {
 func TestRunWithPort(t *testing.T) {
 	router := New()
 	go func() {
-		router.GET("/example", func(c *Context) { c.String(http.StatusOK, "it worked") })
+		router.GET("/example", func(c *context) { c.String(http.StatusOK, "it worked") })
 		assert.NoError(t, router.Run(":5150"))
 	}()
 	// have to wait for the goroutine to start and run the server
@@ -211,7 +211,7 @@ func TestUnixSocket(t *testing.T) {
 	defer os.Remove(unixTestSocket)
 
 	go func() {
-		router.GET("/example", func(c *Context) { c.String(http.StatusOK, "it worked") })
+		router.GET("/example", func(c *context) { c.String(http.StatusOK, "it worked") })
 		assert.NoError(t, router.RunUnix(unixTestSocket))
 	}()
 	// have to wait for the goroutine to start and run the server
@@ -256,7 +256,7 @@ func TestFileDescriptor(t *testing.T) {
 	}
 
 	go func() {
-		router.GET("/example", func(c *Context) { c.String(http.StatusOK, "it worked") })
+		router.GET("/example", func(c *context) { c.String(http.StatusOK, "it worked") })
 		assert.NoError(t, router.RunFd(int(socketFile.Fd())))
 	}()
 	// have to wait for the goroutine to start and run the server
@@ -288,7 +288,7 @@ func TestListener(t *testing.T) {
 	listener, err := net.ListenTCP("tcp", addr)
 	assert.NoError(t, err)
 	go func() {
-		router.GET("/example", func(c *Context) { c.String(http.StatusOK, "it worked") })
+		router.GET("/example", func(c *context) { c.String(http.StatusOK, "it worked") })
 		assert.NoError(t, router.RunListener(listener))
 	}()
 	// have to wait for the goroutine to start and run the server
@@ -320,7 +320,7 @@ func TestBadListener(t *testing.T) {
 
 func TestWithHttptestWithAutoSelectedPort(t *testing.T) {
 	router := New()
-	router.GET("/example", func(c *Context) { c.String(http.StatusOK, "it worked") })
+	router.GET("/example", func(c *context) { c.String(http.StatusOK, "it worked") })
 
 	ts := httptest.NewServer(router)
 	defer ts.Close()
@@ -330,11 +330,11 @@ func TestWithHttptestWithAutoSelectedPort(t *testing.T) {
 
 func TestConcurrentHandleContext(t *testing.T) {
 	router := New()
-	router.GET("/", func(c *Context) {
+	router.GET("/", func(c *context) {
 		c.Request.URL.Path = "/example"
 		router.HandleContext(c)
 	})
-	router.GET("/example", func(c *Context) { c.String(http.StatusOK, "it worked") })
+	router.GET("/example", func(c *context) { c.String(http.StatusOK, "it worked") })
 
 	var wg sync.WaitGroup
 	iterations := 200
@@ -350,7 +350,7 @@ func TestConcurrentHandleContext(t *testing.T) {
 
 // func TestWithHttptestWithSpecifiedPort(t *testing.T) {
 // 	router := New()
-// 	router.GET("/example", func(c *Context) { c.String(http.StatusOK, "it worked") })
+// 	router.GET("/example", func(c *context) { c.String(http.StatusOK, "it worked") })
 
 // 	l, _ := net.Listen("tcp", ":8033")
 // 	ts := httptest.Server{
@@ -376,43 +376,43 @@ func testGetRequestHandler(t *testing.T, h http.Handler, url string) {
 
 func TestTreeRunDynamicRouting(t *testing.T) {
 	router := New()
-	router.GET("/aa/*xx", func(c *Context) { c.String(http.StatusOK, "/aa/*xx") })
-	router.GET("/ab/*xx", func(c *Context) { c.String(http.StatusOK, "/ab/*xx") })
-	router.GET("/", func(c *Context) { c.String(http.StatusOK, "home") })
-	router.GET("/:cc", func(c *Context) { c.String(http.StatusOK, "/:cc") })
-	router.GET("/c1/:dd/e", func(c *Context) { c.String(http.StatusOK, "/c1/:dd/e") })
-	router.GET("/c1/:dd/e1", func(c *Context) { c.String(http.StatusOK, "/c1/:dd/e1") })
-	router.GET("/c1/:dd/f1", func(c *Context) { c.String(http.StatusOK, "/c1/:dd/f1") })
-	router.GET("/c1/:dd/f2", func(c *Context) { c.String(http.StatusOK, "/c1/:dd/f2") })
-	router.GET("/:cc/cc", func(c *Context) { c.String(http.StatusOK, "/:cc/cc") })
-	router.GET("/:cc/:dd/ee", func(c *Context) { c.String(http.StatusOK, "/:cc/:dd/ee") })
-	router.GET("/:cc/:dd/f", func(c *Context) { c.String(http.StatusOK, "/:cc/:dd/f") })
-	router.GET("/:cc/:dd/:ee/ff", func(c *Context) { c.String(http.StatusOK, "/:cc/:dd/:ee/ff") })
-	router.GET("/:cc/:dd/:ee/:ff/gg", func(c *Context) { c.String(http.StatusOK, "/:cc/:dd/:ee/:ff/gg") })
-	router.GET("/:cc/:dd/:ee/:ff/:gg/hh", func(c *Context) { c.String(http.StatusOK, "/:cc/:dd/:ee/:ff/:gg/hh") })
-	router.GET("/get/test/abc/", func(c *Context) { c.String(http.StatusOK, "/get/test/abc/") })
-	router.GET("/get/:param/abc/", func(c *Context) { c.String(http.StatusOK, "/get/:param/abc/") })
-	router.GET("/something/:paramname/thirdthing", func(c *Context) { c.String(http.StatusOK, "/something/:paramname/thirdthing") })
-	router.GET("/something/secondthing/test", func(c *Context) { c.String(http.StatusOK, "/something/secondthing/test") })
-	router.GET("/get/abc", func(c *Context) { c.String(http.StatusOK, "/get/abc") })
-	router.GET("/get/:param", func(c *Context) { c.String(http.StatusOK, "/get/:param") })
-	router.GET("/get/abc/123abc", func(c *Context) { c.String(http.StatusOK, "/get/abc/123abc") })
-	router.GET("/get/abc/:param", func(c *Context) { c.String(http.StatusOK, "/get/abc/:param") })
-	router.GET("/get/abc/123abc/xxx8", func(c *Context) { c.String(http.StatusOK, "/get/abc/123abc/xxx8") })
-	router.GET("/get/abc/123abc/:param", func(c *Context) { c.String(http.StatusOK, "/get/abc/123abc/:param") })
-	router.GET("/get/abc/123abc/xxx8/1234", func(c *Context) { c.String(http.StatusOK, "/get/abc/123abc/xxx8/1234") })
-	router.GET("/get/abc/123abc/xxx8/:param", func(c *Context) { c.String(http.StatusOK, "/get/abc/123abc/xxx8/:param") })
-	router.GET("/get/abc/123abc/xxx8/1234/ffas", func(c *Context) { c.String(http.StatusOK, "/get/abc/123abc/xxx8/1234/ffas") })
-	router.GET("/get/abc/123abc/xxx8/1234/:param", func(c *Context) { c.String(http.StatusOK, "/get/abc/123abc/xxx8/1234/:param") })
-	router.GET("/get/abc/123abc/xxx8/1234/kkdd/12c", func(c *Context) { c.String(http.StatusOK, "/get/abc/123abc/xxx8/1234/kkdd/12c") })
-	router.GET("/get/abc/123abc/xxx8/1234/kkdd/:param", func(c *Context) { c.String(http.StatusOK, "/get/abc/123abc/xxx8/1234/kkdd/:param") })
-	router.GET("/get/abc/:param/test", func(c *Context) { c.String(http.StatusOK, "/get/abc/:param/test") })
-	router.GET("/get/abc/123abd/:param", func(c *Context) { c.String(http.StatusOK, "/get/abc/123abd/:param") })
-	router.GET("/get/abc/123abddd/:param", func(c *Context) { c.String(http.StatusOK, "/get/abc/123abddd/:param") })
-	router.GET("/get/abc/123/:param", func(c *Context) { c.String(http.StatusOK, "/get/abc/123/:param") })
-	router.GET("/get/abc/123abg/:param", func(c *Context) { c.String(http.StatusOK, "/get/abc/123abg/:param") })
-	router.GET("/get/abc/123abf/:param", func(c *Context) { c.String(http.StatusOK, "/get/abc/123abf/:param") })
-	router.GET("/get/abc/123abfff/:param", func(c *Context) { c.String(http.StatusOK, "/get/abc/123abfff/:param") })
+	router.GET("/aa/*xx", func(c *context) { c.String(http.StatusOK, "/aa/*xx") })
+	router.GET("/ab/*xx", func(c *context) { c.String(http.StatusOK, "/ab/*xx") })
+	router.GET("/", func(c *context) { c.String(http.StatusOK, "home") })
+	router.GET("/:cc", func(c *context) { c.String(http.StatusOK, "/:cc") })
+	router.GET("/c1/:dd/e", func(c *context) { c.String(http.StatusOK, "/c1/:dd/e") })
+	router.GET("/c1/:dd/e1", func(c *context) { c.String(http.StatusOK, "/c1/:dd/e1") })
+	router.GET("/c1/:dd/f1", func(c *context) { c.String(http.StatusOK, "/c1/:dd/f1") })
+	router.GET("/c1/:dd/f2", func(c *context) { c.String(http.StatusOK, "/c1/:dd/f2") })
+	router.GET("/:cc/cc", func(c *context) { c.String(http.StatusOK, "/:cc/cc") })
+	router.GET("/:cc/:dd/ee", func(c *context) { c.String(http.StatusOK, "/:cc/:dd/ee") })
+	router.GET("/:cc/:dd/f", func(c *context) { c.String(http.StatusOK, "/:cc/:dd/f") })
+	router.GET("/:cc/:dd/:ee/ff", func(c *context) { c.String(http.StatusOK, "/:cc/:dd/:ee/ff") })
+	router.GET("/:cc/:dd/:ee/:ff/gg", func(c *context) { c.String(http.StatusOK, "/:cc/:dd/:ee/:ff/gg") })
+	router.GET("/:cc/:dd/:ee/:ff/:gg/hh", func(c *context) { c.String(http.StatusOK, "/:cc/:dd/:ee/:ff/:gg/hh") })
+	router.GET("/get/test/abc/", func(c *context) { c.String(http.StatusOK, "/get/test/abc/") })
+	router.GET("/get/:param/abc/", func(c *context) { c.String(http.StatusOK, "/get/:param/abc/") })
+	router.GET("/something/:paramname/thirdthing", func(c *context) { c.String(http.StatusOK, "/something/:paramname/thirdthing") })
+	router.GET("/something/secondthing/test", func(c *context) { c.String(http.StatusOK, "/something/secondthing/test") })
+	router.GET("/get/abc", func(c *context) { c.String(http.StatusOK, "/get/abc") })
+	router.GET("/get/:param", func(c *context) { c.String(http.StatusOK, "/get/:param") })
+	router.GET("/get/abc/123abc", func(c *context) { c.String(http.StatusOK, "/get/abc/123abc") })
+	router.GET("/get/abc/:param", func(c *context) { c.String(http.StatusOK, "/get/abc/:param") })
+	router.GET("/get/abc/123abc/xxx8", func(c *context) { c.String(http.StatusOK, "/get/abc/123abc/xxx8") })
+	router.GET("/get/abc/123abc/:param", func(c *context) { c.String(http.StatusOK, "/get/abc/123abc/:param") })
+	router.GET("/get/abc/123abc/xxx8/1234", func(c *context) { c.String(http.StatusOK, "/get/abc/123abc/xxx8/1234") })
+	router.GET("/get/abc/123abc/xxx8/:param", func(c *context) { c.String(http.StatusOK, "/get/abc/123abc/xxx8/:param") })
+	router.GET("/get/abc/123abc/xxx8/1234/ffas", func(c *context) { c.String(http.StatusOK, "/get/abc/123abc/xxx8/1234/ffas") })
+	router.GET("/get/abc/123abc/xxx8/1234/:param", func(c *context) { c.String(http.StatusOK, "/get/abc/123abc/xxx8/1234/:param") })
+	router.GET("/get/abc/123abc/xxx8/1234/kkdd/12c", func(c *context) { c.String(http.StatusOK, "/get/abc/123abc/xxx8/1234/kkdd/12c") })
+	router.GET("/get/abc/123abc/xxx8/1234/kkdd/:param", func(c *context) { c.String(http.StatusOK, "/get/abc/123abc/xxx8/1234/kkdd/:param") })
+	router.GET("/get/abc/:param/test", func(c *context) { c.String(http.StatusOK, "/get/abc/:param/test") })
+	router.GET("/get/abc/123abd/:param", func(c *context) { c.String(http.StatusOK, "/get/abc/123abd/:param") })
+	router.GET("/get/abc/123abddd/:param", func(c *context) { c.String(http.StatusOK, "/get/abc/123abddd/:param") })
+	router.GET("/get/abc/123/:param", func(c *context) { c.String(http.StatusOK, "/get/abc/123/:param") })
+	router.GET("/get/abc/123abg/:param", func(c *context) { c.String(http.StatusOK, "/get/abc/123abg/:param") })
+	router.GET("/get/abc/123abf/:param", func(c *context) { c.String(http.StatusOK, "/get/abc/123abf/:param") })
+	router.GET("/get/abc/123abfff/:param", func(c *context) { c.String(http.StatusOK, "/get/abc/123abfff/:param") })
 
 	ts := httptest.NewServer(router)
 	defer ts.Close()

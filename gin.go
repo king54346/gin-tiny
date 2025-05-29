@@ -42,8 +42,8 @@ var defaultTrustedCIDRs = []*net.IPNet{
 var regSafePrefix = regexp.MustCompile("[^a-zA-Z0-9/-]+")
 var regRemoveRepeatedChar = regexp.MustCompile("/{2,}")
 
-// HandlerFunc defines the handler used by gin middleware as return value.
-type HandlerFunc func(*Context)
+// HandlerFunc 定义中间件使用的处理函数类型
+type HandlerFunc func(Context)
 
 // HandlersChain defines a HandlerFunc slice.
 type HandlersChain []HandlerFunc
@@ -111,7 +111,7 @@ type Engine struct {
 	// ForwardedByClientIP if enabled, client IP will be parsed from the request's headers that
 	// match those stored at `(*gin.Engine).RemoteIPHeaders`. If no IP was
 	// fetched, it falls back to the IP obtained from
-	// `(*gin.Context).Request.RemoteAddr`.
+	// `(*gin.context).Request.RemoteAddr`.
 	ForwardedByClientIP bool
 
 	// AppEngine was deprecated.
@@ -134,7 +134,7 @@ type Engine struct {
 
 	// RemoteIPHeaders list of headers used to obtain the client IP when
 	// `(*gin.Engine).ForwardedByClientIP` is `true` and
-	// `(*gin.Context).Request.RemoteAddr` is matched by at least one of the
+	// `(*gin.context).Request.RemoteAddr` is matched by at least one of the
 	// network origins of list defined by `(*gin.Engine).SetTrustedProxies()`.
 	RemoteIPHeaders []string
 
@@ -150,7 +150,7 @@ type Engine struct {
 	// h2c 是否开启，http/2的变种，但是不像通常的HTTP/2那样通过TLS加密
 	UseH2C bool
 
-	// ContextWithFallback enable fallback Context.Deadline(), Context.Done(), Context.Err() and Context.Value() when Context.Request.Context() is not nil.
+	// ContextWithFallback enable fallback Context.Deadline(), context.Done(), context.Err() and Context.Value() when context.Request.context() is not nil.
 	ContextWithFallback bool
 
 	secureJSONPrefix string
@@ -196,7 +196,7 @@ func New() *Engine {
 		RemoveExtraSlash:       false,
 		UnescapePathValues:     true,
 		MaxMultipartMemory:     defaultMultipartMemory,
-		trees:                  make(methodTrees, 0, 9), //todo
+		trees:                  make(methodTrees, 0, 9),
 		secureJSONPrefix:       "while(1);",
 		trustedProxies:         []string{"0.0.0.0/0", "::/0"},
 		trustedCIDRs:           defaultTrustedCIDRs,
@@ -227,13 +227,13 @@ func (engine *Engine) Handler() http.Handler {
 	return h2c.NewHandler(engine, h2s)
 }
 
-func (engine *Engine) allocateContext(maxParams uint16) *Context {
+func (engine *Engine) allocateContext(maxParams uint16) *context {
 	v := make(Params, 0, maxParams)
 	skippedNodes := make([]skippedNode, 0, engine.maxSections)
-	return &Context{engine: engine, params: &v, skippedNodes: &skippedNodes}
+	return &context{engine: engine, params: &v, skippedNodes: &skippedNodes}
 }
 
-// SecureJsonPrefix sets the secureJSONPrefix used in Context.SecureJSON.
+// SecureJsonPrefix sets the secureJSONPrefix used in context.SecureJSON.
 func (engine *Engine) SecureJsonPrefix(prefix string) *Engine {
 	engine.secureJSONPrefix = prefix
 	return engine
@@ -269,13 +269,14 @@ func (engine *Engine) rebuild405Handlers() {
 	engine.allNoMethod = engine.combineHandlers(engine.noMethod)
 }
 
+// 添加路由
 func (engine *Engine) addRoute(method, path string, handlers HandlersChain) {
 	assert1(path[0] == '/', "path must begin with '/'")
 	assert1(method != "", "HTTP method can not be empty")
 	assert1(len(handlers) > 0, "there must be at least one handler")
 
 	debugPrintRoute(method, path, handlers)
-
+	// 获取对应方法的路由树根节点
 	root := engine.trees.get(method)
 	if root == nil {
 		root = new(node)
@@ -372,7 +373,7 @@ func (engine *Engine) prepareTrustedCIDRs() ([]*net.IPNet, error) {
 // `(*gin.Engine).ForwardedByClientIP` is `true`. `TrustedProxies`
 // feature is enabled by default, and it also trusts all proxies
 // by default. If you want to disable this feature, use
-// Engine.SetTrustedProxies(nil), then Context.ClientIP() will
+// Engine.SetTrustedProxies(nil), then context.ClientIP() will
 // return the remote address directly.
 func (engine *Engine) SetTrustedProxies(trustedProxies []string) error {
 	engine.trustedProxies = trustedProxies
@@ -518,10 +519,10 @@ func (engine *Engine) RunListener(listener net.Listener) (err error) {
 
 // ServeHTTP conforms to the http.Handler interface.
 func (engine *Engine) ServeHTTP(w http.ResponseWriter, req *http.Request) {
-	c := engine.pool.Get().(*Context)
+	c := engine.pool.Get().(*context)
 	c.writermem.reset(w)
-	c.Request = req
-	c.reset()
+	c.request = req
+	c.Reset()
 
 	engine.handleHTTPRequest(c)
 
@@ -531,20 +532,20 @@ func (engine *Engine) ServeHTTP(w http.ResponseWriter, req *http.Request) {
 // HandleContext re-enters a context that has been rewritten.
 // This can be done by setting c.Request.URL.Path to your new target.
 // Disclaimer: You can loop yourself to deal with this, use wisely.
-func (engine *Engine) HandleContext(c *Context) {
+func (engine *Engine) HandleContext(c *context) {
 	oldIndexValue := c.index
-	c.reset()
+	c.Reset()
 	engine.handleHTTPRequest(c)
 
 	c.index = oldIndexValue
 }
 
-func (engine *Engine) handleHTTPRequest(c *Context) {
-	httpMethod := c.Request.Method
-	rPath := c.Request.URL.Path
+func (engine *Engine) handleHTTPRequest(c *context) {
+	httpMethod := c.Request().Method
+	rPath := c.Request().URL.Path
 	unescape := false
-	if engine.UseRawPath && len(c.Request.URL.RawPath) > 0 {
-		rPath = c.Request.URL.RawPath
+	if engine.UseRawPath && len(c.Request().URL.RawPath) > 0 {
+		rPath = c.Request().URL.RawPath
 		unescape = engine.UnescapePathValues
 	}
 
@@ -601,7 +602,7 @@ func (engine *Engine) handleHTTPRequest(c *Context) {
 
 var mimePlain = []string{MIMEPlain}
 
-func serveError(c *Context, code int, defaultMessage []byte) {
+func serveError(c *context, code int, defaultMessage []byte) {
 	c.writermem.status = code
 	c.Next()
 	if c.writermem.Written() {
@@ -609,7 +610,7 @@ func serveError(c *Context, code int, defaultMessage []byte) {
 	}
 	if c.writermem.Status() == code {
 		c.writermem.Header()["Content-Type"] = mimePlain
-		_, err := c.Writer.Write(defaultMessage)
+		_, err := c.Response().Write(defaultMessage)
 		if err != nil {
 			debugPrint("cannot write message to writer during serve error: %v", err)
 		}
@@ -618,10 +619,10 @@ func serveError(c *Context, code int, defaultMessage []byte) {
 	c.writermem.WriteHeaderNow()
 }
 
-func redirectTrailingSlash(c *Context) {
-	req := c.Request
+func redirectTrailingSlash(c *context) {
+	req := c.Request()
 	p := req.URL.Path
-	if prefix := path.Clean(c.Request.Header.Get("X-Forwarded-Prefix")); prefix != "." {
+	if prefix := path.Clean(c.Request().Header.Get("X-Forwarded-Prefix")); prefix != "." {
 		prefix = regSafePrefix.ReplaceAllString(prefix, "")
 		prefix = regRemoveRepeatedChar.ReplaceAllString(prefix, "/")
 
@@ -634,8 +635,8 @@ func redirectTrailingSlash(c *Context) {
 	redirectRequest(c)
 }
 
-func redirectFixedPath(c *Context, root *node, trailingSlash bool) bool {
-	req := c.Request
+func redirectFixedPath(c *context, root *node, trailingSlash bool) bool {
+	req := c.Request()
 	rPath := req.URL.Path
 
 	if fixedPath, ok := root.findCaseInsensitivePath(cleanPath(rPath), trailingSlash); ok {
@@ -646,8 +647,8 @@ func redirectFixedPath(c *Context, root *node, trailingSlash bool) bool {
 	return false
 }
 
-func redirectRequest(c *Context) {
-	req := c.Request
+func redirectRequest(c *context) {
+	req := c.Request()
 	rPath := req.URL.Path
 	rURL := req.URL.String()
 
@@ -656,6 +657,6 @@ func redirectRequest(c *Context) {
 		code = http.StatusTemporaryRedirect
 	}
 	debugPrint("redirecting request %d: %s --> %s", code, rPath, rURL)
-	http.Redirect(c.Writer, req, rURL, code)
+	http.Redirect(c.Response(), req, rURL, code)
 	c.writermem.WriteHeaderNow()
 }

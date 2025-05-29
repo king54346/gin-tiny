@@ -16,12 +16,13 @@ const (
 	defaultStatus = http.StatusOK
 )
 
-// ResponseWriter ...
+// ResponseWriter 的接口定义了一个响应写入器，它是 http.ResponseWriter 的扩展，
 type ResponseWriter interface {
 	http.ResponseWriter
 	http.Hijacker
 	http.Flusher
-	http.CloseNotifier //todo
+	// 关闭连接的通知通过Request.Context().Done()方法发送
+	//http.CloseNotifier
 
 	// Status returns the HTTP response status code of the current request.
 	Status() int
@@ -110,11 +111,6 @@ func (w *responseWriter) Hijack() (net.Conn, *bufio.ReadWriter, error) {
 		w.size = 0
 	}
 	return w.ResponseWriter.(http.Hijacker).Hijack()
-}
-
-// CloseNotify implements the http.CloseNotifier interface.
-func (w *responseWriter) CloseNotify() <-chan bool {
-	return w.ResponseWriter.(http.CloseNotifier).CloseNotify()
 }
 
 // Flush implements the http.Flusher interface.

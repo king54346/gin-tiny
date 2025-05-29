@@ -58,7 +58,7 @@ func newCors(config Config) *cors {
 	}
 }
 
-func (cors *cors) applyCors(c *gin.Context) {
+func (cors *cors) applyCors(c *gin.context) {
 	origin := c.Request.Header.Get("Origin")
 	if len(origin) == 0 {
 		// request is not a CORS request
@@ -123,14 +123,14 @@ func (cors *cors) validateOrigin(origin string) bool {
 	return false
 }
 
-func (cors *cors) handlePreflight(c *gin.Context) {
+func (cors *cors) handlePreflight(c *gin.context) {
 	header := c.Writer.Header()
 	for key, value := range cors.preflightHeaders {
 		header[key] = value
 	}
 }
 
-func (cors *cors) handleNormal(c *gin.Context) {
+func (cors *cors) handleNormal(c *gin.context) {
 	header := c.Writer.Header()
 	for key, value := range cors.normalHeaders {
 		header[key] = value

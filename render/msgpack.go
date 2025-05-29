@@ -20,7 +20,7 @@ type MsgPack struct {
 	Data any
 }
 
-var msgpackContentType = []string{"application/msgpack; charset=utf-8"}
+var msgpackContentType = []string{MIMEApplicationMsgpack}
 
 // WriteContentType (MsgPack) writes MsgPack ContentType.
 func (r MsgPack) WriteContentType(w http.ResponseWriter) {

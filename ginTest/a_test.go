@@ -19,7 +19,7 @@ func TestGinContextCancel(t *testing.T) {
 
 	r := gin.New()
 	println(r.ContextWithFallback)
-	r.GET("/", func(ginctx *gin.Context) {
+	r.GET("/", func(ginctx gin.Context) {
 		wg.Add(1)
 
 		ginctx = ginctx.Copy()

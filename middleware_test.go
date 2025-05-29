@@ -17,21 +17,21 @@ import (
 func TestMiddlewareGeneralCase(t *testing.T) {
 	signature := ""
 	router := New()
-	router.Use(func(c *Context) {
+	router.Use(func(c *context) {
 		signature += "A"
 		c.Next()
 		signature += "B"
 	})
-	router.Use(func(c *Context) {
+	router.Use(func(c *context) {
 		signature += "C"
 	})
-	router.GET("/", func(c *Context) {
+	router.GET("/", func(c *context) {
 		signature += "D"
 	})
-	router.NoRoute(func(c *Context) {
+	router.NoRoute(func(c *context) {
 		signature += " X "
 	})
-	router.NoMethod(func(c *Context) {
+	router.NoMethod(func(c *context) {
 		signature += " XX "
 	})
 	// RUN
@@ -45,12 +45,12 @@ func TestMiddlewareGeneralCase(t *testing.T) {
 func TestMiddlewareNoRoute(t *testing.T) {
 	signature := ""
 	router := New()
-	router.Use(func(c *Context) {
+	router.Use(func(c *context) {
 		signature += "A"
 		c.Next()
 		signature += "B"
 	})
-	router.Use(func(c *Context) {
+	router.Use(func(c *context) {
 		signature += "C"
 		c.Next()
 		c.Next()
@@ -58,16 +58,16 @@ func TestMiddlewareNoRoute(t *testing.T) {
 		c.Next()
 		signature += "D"
 	})
-	router.NoRoute(func(c *Context) {
+	router.NoRoute(func(c *context) {
 		signature += "E"
 		c.Next()
 		signature += "F"
-	}, func(c *Context) {
+	}, func(c *context) {
 		signature += "G"
 		c.Next()
 		signature += "H"
 	})
-	router.NoMethod(func(c *Context) {
+	router.NoMethod(func(c *context) {
 		signature += " X "
 	})
 	// RUN
@@ -82,29 +82,29 @@ func TestMiddlewareNoMethodEnabled(t *testing.T) {
 	signature := ""
 	router := New()
 	router.HandleMethodNotAllowed = true
-	router.Use(func(c *Context) {
+	router.Use(func(c *context) {
 		signature += "A"
 		c.Next()
 		signature += "B"
 	})
-	router.Use(func(c *Context) {
+	router.Use(func(c *context) {
 		signature += "C"
 		c.Next()
 		signature += "D"
 	})
-	router.NoMethod(func(c *Context) {
+	router.NoMethod(func(c *context) {
 		signature += "E"
 		c.Next()
 		signature += "F"
-	}, func(c *Context) {
+	}, func(c *context) {
 		signature += "G"
 		c.Next()
 		signature += "H"
 	})
-	router.NoRoute(func(c *Context) {
+	router.NoRoute(func(c *context) {
 		signature += " X "
 	})
-	router.POST("/", func(c *Context) {
+	router.POST("/", func(c *context) {
 		signature += " XX "
 	})
 	// RUN
@@ -122,29 +122,29 @@ func TestMiddlewareNoMethodDisabled(t *testing.T) {
 	// NoMethod disabled
 	router.HandleMethodNotAllowed = false
 
-	router.Use(func(c *Context) {
+	router.Use(func(c *context) {
 		signature += "A"
 		c.Next()
 		signature += "B"
 	})
-	router.Use(func(c *Context) {
+	router.Use(func(c *context) {
 		signature += "C"
 		c.Next()
 		signature += "D"
 	})
-	router.NoMethod(func(c *Context) {
+	router.NoMethod(func(c *context) {
 		signature += "E"
 		c.Next()
 		signature += "F"
-	}, func(c *Context) {
+	}, func(c *context) {
 		signature += "G"
 		c.Next()
 		signature += "H"
 	})
-	router.NoRoute(func(c *Context) {
+	router.NoRoute(func(c *context) {
 		signature += " X "
 	})
-	router.POST("/", func(c *Context) {
+	router.POST("/", func(c *context) {
 		signature += " XX "
 	})
 
@@ -159,16 +159,16 @@ func TestMiddlewareNoMethodDisabled(t *testing.T) {
 func TestMiddlewareAbort(t *testing.T) {
 	signature := ""
 	router := New()
-	router.Use(func(c *Context) {
+	router.Use(func(c *context) {
 		signature += "A"
 	})
-	router.Use(func(c *Context) {
+	router.Use(func(c *context) {
 		signature += "C"
 		c.AbortWithStatus(http.StatusUnauthorized)
 		c.Next()
 		signature += "D"
 	})
-	router.GET("/", func(c *Context) {
+	router.GET("/", func(c *context) {
 		signature += " X "
 		c.Next()
 		signature += " XX "
@@ -185,13 +185,13 @@ func TestMiddlewareAbort(t *testing.T) {
 func TestMiddlewareAbortHandlersChainAndNext(t *testing.T) {
 	signature := ""
 	router := New()
-	router.Use(func(c *Context) {
+	router.Use(func(c *context) {
 		signature += "A"
 		c.Next()
 		c.AbortWithStatus(http.StatusGone)
 		signature += "B"
 	})
-	router.GET("/", func(c *Context) {
+	router.GET("/", func(c *context) {
 		signature += "C"
 		c.Next()
 	})
@@ -209,11 +209,11 @@ func TestMiddlewareFailHandlersChain(t *testing.T) {
 	// SETUP
 	signature := ""
 	router := New()
-	router.Use(func(context *Context) {
+	router.Use(func(context *context) {
 		signature += "A"
 		context.AbortWithError(http.StatusInternalServerError, errors.New("foo")) //nolint: errcheck
 	})
-	router.Use(func(context *Context) {
+	router.Use(func(context *context) {
 		signature += "B"
 		context.Next()
 		signature += "C"
@@ -228,18 +228,18 @@ func TestMiddlewareFailHandlersChain(t *testing.T) {
 
 func TestMiddlewareWrite(t *testing.T) {
 	router := New()
-	router.Use(func(c *Context) {
+	router.Use(func(c *context) {
 		c.String(http.StatusBadRequest, "hola\n")
 	})
-	router.Use(func(c *Context) {
+	router.Use(func(c *context) {
 		c.XML(http.StatusBadRequest, H{"foo": "bar"})
 	})
-	router.Use(func(c *Context) {
+	router.Use(func(c *context) {
 		c.JSON(http.StatusBadRequest, H{"foo": "bar"})
 	})
-	router.GET("/", func(c *Context) {
+	router.GET("/", func(c *context) {
 		c.JSON(http.StatusBadRequest, H{"foo": "bar"})
-	}, func(c *Context) {
+	}, func(c *context) {
 		c.Render(http.StatusBadRequest, sse.Event{
 			Event: "test",
 			Data:  "message",

@@ -6,7 +6,7 @@ package binding
 
 import "net/http"
 
-// Content-Type MIME of the most common data formats.
+// 最常见的数据格式的 Content-Type MIME 类型。
 const (
 	MIMEJSON              = "application/json"
 	MIMEHTML              = "text/html"

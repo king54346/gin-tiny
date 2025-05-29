@@ -293,7 +293,7 @@ func TestShouldBindUri(t *testing.T) {
 		Name string `uri:"name" binding:"required"`
 		ID   string `uri:"id" binding:"required"`
 	}
-	router.Handle(http.MethodGet, "/rest/:name/:id", func(c *Context) {
+	router.Handle(http.MethodGet, "/rest/:name/:id", func(c *context) {
 		var person Person
 		assert.NoError(t, c.ShouldBindUri(&person))
 		assert.True(t, person.Name != "")
@@ -315,7 +315,7 @@ func TestBindUri(t *testing.T) {
 		Name string `uri:"name" binding:"required"`
 		ID   string `uri:"id" binding:"required"`
 	}
-	router.Handle(http.MethodGet, "/rest/:name/:id", func(c *Context) {
+	router.Handle(http.MethodGet, "/rest/:name/:id", func(c *context) {
 		var person Person
 		assert.NoError(t, c.BindUri(&person))
 		assert.True(t, person.Name != "")
@@ -336,7 +336,7 @@ func TestBindUriError(t *testing.T) {
 	type Member struct {
 		Number string `uri:"num" binding:"required,uuid"`
 	}
-	router.Handle(http.MethodGet, "/new/rest/:num", func(c *Context) {
+	router.Handle(http.MethodGet, "/new/rest/:num", func(c *context) {
 		var m Member
 		assert.Error(t, c.BindUri(&m))
 	})
@@ -349,11 +349,11 @@ func TestBindUriError(t *testing.T) {
 func TestRaceContextCopy(t *testing.T) {
 	DefaultWriter = os.Stdout
 	router := Default()
-	router.GET("/test/copy/race", func(c *Context) {
+	router.GET("/test/copy/race", func(c *context) {
 		c.Set("1", 0)
 		c.Set("2", 0)
 
-		// Sending a copy of the Context to two separate routines
+		// Sending a copy of the context to two separate routines
 		go readWriteKeys(c.Copy())
 		go readWriteKeys(c.Copy())
 		c.String(http.StatusOK, "run OK, no panics")
@@ -362,7 +362,7 @@ func TestRaceContextCopy(t *testing.T) {
 	assert.Equal(t, "run OK, no panics", w.Body.String())
 }
 
-func readWriteKeys(c *Context) {
+func readWriteKeys(c *context) {
 	for {
 		c.Set("1", rand.Int())
 		c.Set("2", c.Value("1"))
@@ -371,7 +371,7 @@ func readWriteKeys(c *Context) {
 
 func githubConfigRouter(router *Engine) {
 	for _, route := range githubAPI {
-		router.Handle(route.method, route.path, func(c *Context) {
+		router.Handle(route.method, route.path, func(c *context) {
 			output := make(map[string]string, len(c.Params)+1)
 			output["status"] = "good"
 			for _, param := range c.Params {

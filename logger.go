@@ -55,7 +55,7 @@ type LoggerConfig struct {
 // LogFormatter gives the signature of the formatter function passed to LoggerWithFormatter
 type LogFormatter func(params LogFormatterParams) string
 
-// LogFormatterParams is the structure any formatter will be handed when time to log comes
+// LogFormatterParams 是日志格式化器参数的结构体，包含了请求和响应的相关信息
 type LogFormatterParams struct {
 	Request *http.Request
 
@@ -65,7 +65,7 @@ type LogFormatterParams struct {
 	StatusCode int
 	// Latency is how much time the server cost to process a certain request.
 	Latency time.Duration
-	// ClientIP equals Context's ClientIP method.
+	// ClientIP equals context's ClientIP method.
 	ClientIP string
 	// Method is the HTTP method given to the request.
 	Method string
@@ -78,7 +78,7 @@ type LogFormatterParams struct {
 	// BodySize is the size of the Response Body
 	BodySize int
 	// Keys are the keys set on the request's context.
-	Keys map[string]any
+	//Keys map[string]any
 }
 
 // StatusCodeColor is the ANSI color for appropriately logging http status code to a terminal.
@@ -171,9 +171,10 @@ func ErrorLogger() HandlerFunc {
 
 // ErrorLoggerT returns a HandlerFunc for a given error type.
 func ErrorLoggerT(typ ErrorType) HandlerFunc {
-	return func(c *Context) {
+	return func(c Context) {
 		c.Next()
-		errors := c.Errors.ByType(typ)
+
+		errors := c.Errors().ByType(typ)
 		if len(errors) > 0 {
 			c.JSON(-1, errors)
 		}
@@ -232,11 +233,11 @@ func LoggerWithConfig(conf LoggerConfig) HandlerFunc {
 		}
 	}
 
-	return func(c *Context) {
+	return func(c Context) {
 		// Start timer
 		start := time.Now()
-		path := c.Request.URL.Path
-		raw := c.Request.URL.RawQuery
+		path := c.Request().URL.Path
+		raw := c.Request().URL.RawQuery
 
 		// Process request
 		c.Next()
@@ -244,9 +245,9 @@ func LoggerWithConfig(conf LoggerConfig) HandlerFunc {
 		// Log only when path is not being skipped
 		if _, ok := skip[path]; !ok {
 			param := LogFormatterParams{
-				Request: c.Request,
+				Request: c.Request(),
 				isTerm:  isTerm,
-				Keys:    c.Keys,
+				//Keys:    c.keys,
 			}
 
 			// Stop timer
@@ -254,11 +255,11 @@ func LoggerWithConfig(conf LoggerConfig) HandlerFunc {
 			param.Latency = param.TimeStamp.Sub(start)
 
 			param.ClientIP = c.ClientIP()
-			param.Method = c.Request.Method
-			param.StatusCode = c.Writer.Status()
-			param.ErrorMessage = c.Errors.ByType(ErrorTypePrivate).String()
+			param.Method = c.Request().Method
+			param.StatusCode = c.Response().Status()
+			param.ErrorMessage = c.Errors().ByType(ErrorTypePrivate).String()
 
-			param.BodySize = c.Writer.Size()
+			param.BodySize = c.Response().Size()
 
 			if raw != "" {
 				path = path + "?" + raw

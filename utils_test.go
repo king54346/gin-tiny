@@ -115,7 +115,7 @@ func TestBindMiddleware(t *testing.T) {
 	var value *bindTestStruct
 	var called bool
 	router := New()
-	router.GET("/", Bind(bindTestStruct{}), func(c *Context) {
+	router.GET("/", Bind(bindTestStruct{}), func(c *context) {
 		called = true
 		value = c.MustGet(BindKey).(*bindTestStruct)
 	})

@@ -49,7 +49,7 @@ var (
 	requestTime     = time.Date(2018, time.October, 22, 0o7, 0o0, 0o7, 0o0, time.UTC)
 )
 
-func runTest(secretKeys Secrets, headers []string, v []validator.Validator, req *http.Request) *gin.Context {
+func runTest(secretKeys Secrets, headers []string, v []validator.Validator, req *http.Request) *gin.context {
 	gin.SetMode(gin.TestMode)
 	auth := NewAuthenticator(secretKeys, WithRequiredHeaders(headers), WithValidator(v...))
 	c, _ := gin.CreateTestContext(httptest.NewRecorder())
@@ -152,14 +152,14 @@ var mockValidator = []validator.Validator{
 	validator.NewDigestValidator(),
 }
 
-func httpTestGet(c *gin.Context) {
+func httpTestGet(c *gin.context) {
 	c.JSON(http.StatusOK,
 		gin.H{
 			"success": true,
 		})
 }
 
-func httpTestPost(c *gin.Context) {
+func httpTestPost(c *gin.context) {
 	body, err := c.GetRawData()
 	if err != nil {
 		c.AbortWithStatus(http.StatusInternalServerError)

@@ -161,7 +161,7 @@ func Default() gin.HandlerFunc {
 // New returns the location middleware with user-defined custom configuration.
 func New(config Config) gin.HandlerFunc {
 	cors := newCors(config)
-	return func(c *gin.Context) {
+	return func(c *gin.context) {
 		cors.applyCors(c)
 	}
 }

@@ -85,7 +85,7 @@ func TestBasicAuthSucceed(t *testing.T) {
 	accounts := Accounts{"admin": "password"}
 	router := New()
 	router.Use(BasicAuth(accounts))
-	router.GET("/login", func(c *Context) {
+	router.GET("/login", func(c Context) {
 		c.String(http.StatusOK, c.MustGet(AuthUserKey).(string))
 	})
 
@@ -103,7 +103,7 @@ func TestBasicAuth401(t *testing.T) {
 	accounts := Accounts{"foo": "bar"}
 	router := New()
 	router.Use(BasicAuth(accounts))
-	router.GET("/login", func(c *Context) {
+	router.GET("/login", func(c Context) {
 		called = true
 		c.String(http.StatusOK, c.MustGet(AuthUserKey).(string))
 	})
@@ -123,7 +123,7 @@ func TestBasicAuth401WithCustomRealm(t *testing.T) {
 	accounts := Accounts{"foo": "bar"}
 	router := New()
 	router.Use(BasicAuthForRealm(accounts, "My Custom \"Realm\""))
-	router.GET("/login", func(c *Context) {
+	router.GET("/login", func(c Context) {
 		called = true
 		c.String(http.StatusOK, c.MustGet(AuthUserKey).(string))
 	})

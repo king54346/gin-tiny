@@ -32,7 +32,7 @@ func TestH2c(t *testing.T) {
 	}
 	r := Default()
 	r.UseH2C = true
-	r.GET("/", func(c *Context) {
+	r.GET("/", func(c *context) {
 		c.String(200, "<h1>Hello world</h1>")
 	})
 	go func() {
@@ -76,31 +76,31 @@ func TestCreateEngine(t *testing.T) {
 
 func TestAddRoute(t *testing.T) {
 	router := New()
-	router.addRoute("GET", "/", HandlersChain{func(_ *Context) {}})
+	router.addRoute("GET", "/", HandlersChain{func(_ *context) {}})
 
 	assert.Len(t, router.trees, 1)
 	assert.NotNil(t, router.trees.get("GET"))
 	assert.Nil(t, router.trees.get("POST"))
 
-	router.addRoute("POST", "/", HandlersChain{func(_ *Context) {}})
+	router.addRoute("POST", "/", HandlersChain{func(_ *context) {}})
 
 	assert.Len(t, router.trees, 2)
 	assert.NotNil(t, router.trees.get("GET"))
 	assert.NotNil(t, router.trees.get("POST"))
 
-	router.addRoute("POST", "/post", HandlersChain{func(_ *Context) {}})
+	router.addRoute("POST", "/post", HandlersChain{func(_ *context) {}})
 	assert.Len(t, router.trees, 2)
 }
 
 func TestAddRouteFails(t *testing.T) {
 	router := New()
-	assert.Panics(t, func() { router.addRoute("", "/", HandlersChain{func(_ *Context) {}}) })
-	assert.Panics(t, func() { router.addRoute("GET", "a", HandlersChain{func(_ *Context) {}}) })
+	assert.Panics(t, func() { router.addRoute("", "/", HandlersChain{func(_ *context) {}}) })
+	assert.Panics(t, func() { router.addRoute("GET", "a", HandlersChain{func(_ *context) {}}) })
 	assert.Panics(t, func() { router.addRoute("GET", "/", HandlersChain{}) })
 
-	router.addRoute("POST", "/post", HandlersChain{func(_ *Context) {}})
+	router.addRoute("POST", "/post", HandlersChain{func(_ *context) {}})
 	assert.Panics(t, func() {
-		router.addRoute("POST", "/post", HandlersChain{func(_ *Context) {}})
+		router.addRoute("POST", "/post", HandlersChain{func(_ *context) {}})
 	})
 }
 
@@ -110,8 +110,8 @@ func TestCreateDefaultRouter(t *testing.T) {
 }
 
 func TestNoRouteWithoutGlobalHandlers(t *testing.T) {
-	var middleware0 HandlerFunc = func(c *Context) {}
-	var middleware1 HandlerFunc = func(c *Context) {}
+	var middleware0 HandlerFunc = func(c *context) {}
+	var middleware1 HandlerFunc = func(c *context) {}
 
 	router := New()
 
@@ -132,9 +132,9 @@ func TestNoRouteWithoutGlobalHandlers(t *testing.T) {
 }
 
 func TestNoRouteWithGlobalHandlers(t *testing.T) {
-	var middleware0 HandlerFunc = func(c *Context) {}
-	var middleware1 HandlerFunc = func(c *Context) {}
-	var middleware2 HandlerFunc = func(c *Context) {}
+	var middleware0 HandlerFunc = func(c *context) {}
+	var middleware1 HandlerFunc = func(c *context) {}
+	var middleware2 HandlerFunc = func(c *context) {}
 
 	router := New()
 	router.Use(middleware2)
@@ -163,8 +163,8 @@ func TestNoRouteWithGlobalHandlers(t *testing.T) {
 }
 
 func TestNoMethodWithoutGlobalHandlers(t *testing.T) {
-	var middleware0 HandlerFunc = func(c *Context) {}
-	var middleware1 HandlerFunc = func(c *Context) {}
+	var middleware0 HandlerFunc = func(c *context) {}
+	var middleware1 HandlerFunc = func(c *context) {}
 
 	router := New()
 
@@ -188,9 +188,9 @@ func TestRebuild404Handlers(t *testing.T) {
 }
 
 func TestNoMethodWithGlobalHandlers(t *testing.T) {
-	var middleware0 HandlerFunc = func(c *Context) {}
-	var middleware1 HandlerFunc = func(c *Context) {}
-	var middleware2 HandlerFunc = func(c *Context) {}
+	var middleware0 HandlerFunc = func(c *context) {}
+	var middleware1 HandlerFunc = func(c *context) {}
+	var middleware2 HandlerFunc = func(c *context) {}
 
 	router := New()
 	router.Use(middleware2)
@@ -263,13 +263,13 @@ func TestListOfRoutes(t *testing.T) {
 
 func TestEngineHandleContext(t *testing.T) {
 	r := New()
-	r.GET("/", func(c *Context) {
+	r.GET("/", func(c *context) {
 		c.Request.URL.Path = "/v2"
 		r.HandleContext(c)
 	})
 	v2 := r.Group("/v2")
 	{
-		v2.GET("/", func(c *Context) {})
+		v2.GET("/", func(c *context) {})
 	}
 
 	assert.NotPanics(t, func() {
@@ -284,10 +284,10 @@ func TestEngineHandleContextManyReEntries(t *testing.T) {
 	var handlerCounter, middlewareCounter int64
 
 	r := New()
-	r.Use(func(c *Context) {
+	r.Use(func(c *context) {
 		atomic.AddInt64(&middlewareCounter, 1)
 	})
-	r.GET("/:count", func(c *Context) {
+	r.GET("/:count", func(c *context) {
 		countStr := c.Param("count")
 		count, err := strconv.Atoi(countStr)
 		assert.NoError(t, err)
@@ -301,7 +301,7 @@ func TestEngineHandleContextManyReEntries(t *testing.T) {
 			c.Request.URL.Path = "/" + strconv.Itoa(count-1)
 			r.HandleContext(c)
 		}
-	}, func(c *Context) {
+	}, func(c *context) {
 		atomic.AddInt64(&handlerCounter, 1)
 	})
 
@@ -438,5 +438,5 @@ func assertRoutePresent(t *testing.T, gotRoutes RoutesInfo, wantRoute RouteInfo)
 	t.Errorf("route not found: %v", wantRoute)
 }
 
-func handlerTest1(c *Context) {}
-func handlerTest2(c *Context) {}
+func handlerTest1(c *context) {}
+func handlerTest2(c *context) {}
