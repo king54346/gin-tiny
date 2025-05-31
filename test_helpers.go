@@ -10,8 +10,9 @@ import "net/http"
 func CreateTestContext(w http.ResponseWriter) (c *context, r *Engine) {
 	r = New()
 	c = r.allocateContext(0)
+
 	c.Reset()
-	c.writermem.reset(w)
+	c.writermem = NewResponseWriter(w)
 	return
 }
 
@@ -19,6 +20,6 @@ func CreateTestContext(w http.ResponseWriter) (c *context, r *Engine) {
 func CreateTestContextOnly(w http.ResponseWriter, r *Engine) (c *context) {
 	c = r.allocateContext(r.maxParams)
 	c.Reset()
-	c.writermem.reset(w)
+	c.writermem = NewResponseWriter(w)
 	return
 }

@@ -27,6 +27,7 @@ type ResponseWriter interface {
 	// Status returns the HTTP response status code of the current request.
 	Status() int
 
+	SetStatus(int)
 	// Size returns the number of bytes already written into the response http body.
 	// See Written()
 	Size() int
@@ -46,11 +47,25 @@ type ResponseWriter interface {
 
 type responseWriter struct {
 	http.ResponseWriter
-	size   int
-	status int
+	beforeFuncs []func()
+	afterFuncs  []func()
+	size        int
+	status      int
+	committed   bool
 }
 
 var _ ResponseWriter = (*responseWriter)(nil)
+
+func NewResponseWriter(writer http.ResponseWriter) *responseWriter {
+	w := &responseWriter{
+		ResponseWriter: writer,
+		beforeFuncs:    make([]func(), 0, 4),
+		afterFuncs:     make([]func(), 0, 4),
+		size:           noWritten,
+		status:         defaultStatus,
+	}
+	return w
+}
 
 func (w *responseWriter) Unwrap() http.ResponseWriter {
 	return w.ResponseWriter
@@ -65,7 +80,8 @@ func (w *responseWriter) reset(writer http.ResponseWriter) {
 func (w *responseWriter) WriteHeader(code int) {
 	if code > 0 && w.status != code {
 		if w.Written() {
-			//debugPrint("[WARNING] Headers were already written. Wanted to override status code %d with %d", w.status, code)
+			// 直接返回，不做任何操作
+			// debugPrint("[WARNING] Headers were already written. Wanted to override status code %d with %d", w.status, code)
 			return
 		}
 		w.status = code
@@ -77,6 +93,13 @@ func (w *responseWriter) WriteHeaderNow() {
 		w.size = 0
 		w.ResponseWriter.WriteHeader(w.status)
 	}
+}
+
+func (w *responseWriter) Before(fn func()) {
+	w.beforeFuncs = append(w.beforeFuncs, fn)
+}
+func (w *responseWriter) After(fn func()) {
+	w.afterFuncs = append(w.afterFuncs, fn)
 }
 
 func (w *responseWriter) Write(data []byte) (n int, err error) {
@@ -101,6 +124,7 @@ func (w *responseWriter) Size() int {
 	return w.size
 }
 
+// Written 表示响应是否已经被写入, 如果 size 为 noWritten，则表示尚未写入响应体；
 func (w *responseWriter) Written() bool {
 	return w.size != noWritten
 }
@@ -124,4 +148,14 @@ func (w *responseWriter) Pusher() (pusher http.Pusher) {
 		return pusher
 	}
 	return nil
+}
+
+func (w *responseWriter) SetStatus(status int) {
+	if status > 0 && w.status != status {
+		if w.Written() {
+			//debugPrint("[WARNING] Headers were already written. Wanted to override status code %d with %d", w.status, status)
+			return
+		}
+		w.status = status
+	}
 }

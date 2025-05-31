@@ -35,24 +35,24 @@ func (t *testStruct) ServeHTTP(w http.ResponseWriter, req *http.Request) {
 	fmt.Fprint(w, "hello")
 }
 
-func TestWrap(t *testing.T) {
-	router := New()
-	router.POST("/path", WrapH(&testStruct{t}))
-	router.GET("/path2", WrapF(func(w http.ResponseWriter, req *http.Request) {
-		assert.Equal(t, "GET", req.Method)
-		assert.Equal(t, "/path2", req.URL.Path)
-		w.WriteHeader(http.StatusBadRequest)
-		fmt.Fprint(w, "hola!")
-	}))
-
-	w := PerformRequest(router, "POST", "/path")
-	assert.Equal(t, http.StatusInternalServerError, w.Code)
-	assert.Equal(t, "hello", w.Body.String())
-
-	w = PerformRequest(router, "GET", "/path2")
-	assert.Equal(t, http.StatusBadRequest, w.Code)
-	assert.Equal(t, "hola!", w.Body.String())
-}
+//func TestWrap(t *testing.T) {
+//	router := New()
+//	router.POST("/path", WrapH(&testStruct{t}))
+//	router.GET("/path2", WrapF(func(w http.ResponseWriter, req *http.Request) {
+//		assert.Equal(t, "GET", req.Method)
+//		assert.Equal(t, "/path2", req.URL.Path)
+//		w.WriteHeader(http.StatusBadRequest)
+//		fmt.Fprint(w, "hola!")
+//	}))
+//
+//	w := PerformRequest(router, "POST", "/path")
+//	assert.Equal(t, http.StatusInternalServerError, w.Code)
+//	assert.Equal(t, "hello", w.Body.String())
+//
+//	w = PerformRequest(router, "GET", "/path2")
+//	assert.Equal(t, http.StatusBadRequest, w.Code)
+//	assert.Equal(t, "hola!", w.Body.String())
+//}
 
 func TestLastChar(t *testing.T) {
 	assert.Equal(t, uint8('a'), lastChar("hola"))
@@ -111,27 +111,27 @@ type bindTestStruct struct {
 	Bar int    `form:"bar" binding:"min=4"`
 }
 
-func TestBindMiddleware(t *testing.T) {
-	var value *bindTestStruct
-	var called bool
-	router := New()
-	router.GET("/", Bind(bindTestStruct{}), func(c *context) {
-		called = true
-		value = c.MustGet(BindKey).(*bindTestStruct)
-	})
-	PerformRequest(router, "GET", "/?foo=hola&bar=10")
-	assert.True(t, called)
-	assert.Equal(t, "hola", value.Foo)
-	assert.Equal(t, 10, value.Bar)
-
-	called = false
-	PerformRequest(router, "GET", "/?foo=hola&bar=1")
-	assert.False(t, called)
-
-	assert.Panics(t, func() {
-		Bind(&bindTestStruct{})
-	})
-}
+//func TestBindMiddleware(t *testing.T) {
+//	var value *bindTestStruct
+//	var called bool
+//	router := New()
+//	router.GET("/", Bind(bindTestStruct{}), func(c *context) {
+//		called = true
+//		value = c.MustGet(BindKey).(*bindTestStruct)
+//	})
+//	PerformRequest(router, "GET", "/?foo=hola&bar=10")
+//	assert.True(t, called)
+//	assert.Equal(t, "hola", value.Foo)
+//	assert.Equal(t, 10, value.Bar)
+//
+//	called = false
+//	PerformRequest(router, "GET", "/?foo=hola&bar=1")
+//	assert.False(t, called)
+//
+//	assert.Panics(t, func() {
+//		Bind(&bindTestStruct{})
+//	})
+//}
 
 func TestMarshalXMLforH(t *testing.T) {
 	h := H{

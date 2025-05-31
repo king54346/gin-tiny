@@ -230,7 +230,7 @@ func (engine *Engine) Handler() http.Handler {
 func (engine *Engine) allocateContext(maxParams uint16) *context {
 	v := make(Params, 0, maxParams)
 	skippedNodes := make([]skippedNode, 0, engine.maxSections)
-	return &context{engine: engine, params: &v, skippedNodes: &skippedNodes}
+	return &context{engine: engine, params: &v, skippedNodes: &skippedNodes, writermem: NewResponseWriter(nil)}
 }
 
 // SecureJsonPrefix sets the secureJSONPrefix used in context.SecureJSON.
@@ -529,9 +529,8 @@ func (engine *Engine) ServeHTTP(w http.ResponseWriter, req *http.Request) {
 	engine.pool.Put(c)
 }
 
-// HandleContext re-enters a context that has been rewritten.
-// This can be done by setting c.Request.URL.Path to your new target.
-// Disclaimer: You can loop yourself to deal with this, use wisely.
+// HandleContext 用于重新处理一个已经被重写（如 c.Request.URL.Path 被修改）的上下文（context）。
+// 他会重置上下文的状态，并将其恢复到原来的状态（如 c.index），然后重新处理 HTTP 请求。
 func (engine *Engine) HandleContext(c *context) {
 	oldIndexValue := c.index
 	c.Reset()
@@ -563,7 +562,7 @@ func (engine *Engine) handleHTTPRequest(c *context) {
 		// 从路由树中查找handlers
 		value := root.getValue(rPath, c.params, c.skippedNodes, unescape)
 		if value.params != nil {
-			c.Params = *value.params
+			c.params = value.params
 		}
 		if value.handlers != nil {
 			c.handlers = value.handlers

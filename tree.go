@@ -30,8 +30,8 @@ type Param struct {
 // It is therefore safe to read values by the index.
 type Params []Param
 
-// Get returns the value of the first Param which key matches the given name and a boolean true.
-// If no matching Param is found, an empty string is returned and a boolean false .
+// Get方法返回第一个匹配的参数值和一个布尔值，如果没有找到匹配的参数，则返回空字符串和布尔值false
+// 注意：如果有多个参数具有相同的key，Get方法只会返回第一个匹配的参数值。
 func (ps Params) Get(name string) (string, bool) {
 	for _, entry := range ps {
 		if entry.Key == name {
@@ -43,9 +43,19 @@ func (ps Params) Get(name string) (string, bool) {
 
 // ByName returns the value of the first Param which key matches the given name.
 // If no matching Param is found, an empty string is returned.
+// ByName 返回第一个匹配的参数值，如果没有找到匹配的参数，则返回空字符串。
 func (ps Params) ByName(name string) (va string) {
 	va, _ = ps.Get(name)
 	return
+}
+
+func (ps Params) Copy() Params {
+	if ps == nil {
+		return nil
+	}
+	c := make(Params, len(ps))
+	copy(c, ps)
+	return c
 }
 
 // http的请求方法Get，Post等

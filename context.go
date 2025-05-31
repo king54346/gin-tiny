@@ -54,7 +54,7 @@ type Context interface {
 	SetRequest(r *http.Request)
 
 	// SetResponse sets `*Response`.
-	//SetResponse(r *Response)
+	SetResponse(r ResponseWriter)
 
 	// Response returns `*Response`.
 	Response() ResponseWriter
@@ -82,6 +82,7 @@ type Context interface {
 	// Param returns path parameter by name.
 	Param(name string) string
 
+	ParamGet(name string) (string, bool)
 	// ParamNames returns path parameter names.
 	ParamNames() []string
 
@@ -93,9 +94,6 @@ type Context interface {
 
 	// SetParamValues sets path parameter values.
 	SetParamValues(values ...string)
-
-	// QueryParam returns the query param for the provided name.
-	QueryParam(name string) string
 
 	// QueryParams returns the query parameters as `url.Values`.
 	QueryParams() url.Values
@@ -242,6 +240,11 @@ type Context interface {
 	Err() error
 	Value(key any) any
 	MustGet(key string) any
+	FullPath() string
+	Status(code int)
+	ShouldBindUri(obj any) error
+	BindUri(obj any) error
+	Params() Params
 }
 
 // todo 响应hook（after/before hooks）在gin中没有实现，而不是像echo通过将func放入到response中,hook reponse的Write去实现
@@ -250,10 +253,9 @@ type Context interface {
 // manage the flow, validate the JSON of a request and render a JSON response for example.
 type context struct {
 	// writermem 是一个自定义的响应写入器，实现了 ResponseWriter 接口。
-	writermem responseWriter
+	writermem *responseWriter
 	request   *http.Request
 
-	Params   Params // 外部使用的参数是params的值拷贝
 	handlers HandlersChain
 	index    int8 // index 表示当前处理器在handlers链中的索引位置。它的值会随着调用Next()方法而递增，直到达到handlers链的末尾或被Abort()方法中断。
 	fullPath string
@@ -311,7 +313,7 @@ func (c *context) SetRequest(r *http.Request) {
 }
 
 func (c *context) Response() ResponseWriter {
-	return &c.writermem
+	return c.writermem
 }
 
 func (c *context) IsTLS() bool {
@@ -364,9 +366,8 @@ func (c *context) SetParamValues(values ...string) {
 	panic("implement me")
 }
 
-func (c *context) QueryParam(name string) string {
-	//TODO implement me
-	panic("implement me")
+func (c *context) ParamGet(name string) (string, bool) {
+	return c.params.Get(name)
 }
 
 func (c *context) QueryParams() url.Values {
@@ -459,12 +460,20 @@ func (c *context) SetHandler(h HandlerFunc) {
 	panic("implement me")
 }
 
+func (c *context) SetResponse(r ResponseWriter) {
+	// 设置响应写入器
+	if rw, ok := r.(*responseWriter); ok {
+		c.writermem = rw
+	} else {
+		c.writermem = NewResponseWriter(r)
+	}
+}
+
 /************************************/
 /********** CONTEXT CREATION ********/
 /************************************/
 
 func (c *context) Reset() {
-	c.Params = c.Params[:0]
 	c.handlers = nil
 	c.index = -1
 
@@ -483,21 +492,28 @@ func (c *context) Reset() {
 // This has to be used when the context has to be passed to a goroutine.
 func (c *context) Copy() *context {
 	cp := context{
-		writermem: c.writermem,
-		request:   c.Request(),
-		Params:    c.Params,
-		engine:    c.engine,
+		request: c.Request(),
+		engine:  c.engine,
 	}
-	cp.writermem.ResponseWriter = nil
+	// 深拷贝 writermem
+	if c.writermem != nil {
+		w := *c.writermem
+		cp.writermem = &w
+	}
 	cp.index = abortIndex
 	cp.handlers = nil
 	cp.Keys = map[string]any{}
 	for k, v := range c.Keys {
 		cp.Keys[k] = v
 	}
-	paramCopy := make([]Param, len(cp.Params))
-	copy(paramCopy, cp.Params)
-	cp.Params = paramCopy
+	// 深拷贝 params
+	if c.params != nil {
+		newParams := make(Params, len(*c.params))
+		copy(newParams, *c.params)
+		cp.params = &newParams
+	}
+	cp.fullPath = c.fullPath
+	cp.skippedNodes = c.skippedNodes // 如需深拷贝可同理处理
 	return &cp
 }
 
@@ -760,7 +776,14 @@ func (c *context) GetStringMapStringSlice(key string) (smss map[string][]string)
 //	    id := c.Param("id") // id == "/john/"
 //	})
 func (c *context) Param(key string) string {
-	return c.Params.ByName(key)
+	return c.params.ByName(key)
+}
+
+func (c *context) Params() Params {
+	// 返回一个参数的副本
+	// 这样可以避免在外部修改 context.Params 的值
+	// 直接影响到 context 的参数
+	return c.params.Copy()
 }
 
 // AddParam adds param to context and
@@ -769,7 +792,7 @@ func (c *context) Param(key string) string {
 // AddParam("id", 1)
 // Result: "/user/1"
 func (c *context) AddParam(key, value string) {
-	c.Params = append(c.Params, Param{Key: key, Value: value})
+	*c.params = append(*c.params, Param{Key: key, Value: value})
 }
 
 // Query returns the keyed url query value if it exists,
@@ -826,7 +849,7 @@ func (c *context) QueryArray(key string) (values []string) {
 
 func (c *context) initQueryCache() {
 	if c.queryCache == nil {
-		if c.Request != nil {
+		if c.request != nil {
 			c.queryCache = c.Request().URL.Query()
 		} else {
 			c.queryCache = url.Values{}
@@ -1103,7 +1126,7 @@ func (c *context) ShouldBindHeader(obj any) error {
 // 例如：/:name/:id
 func (c *context) ShouldBindUri(obj any) error {
 	m := make(map[string][]string)
-	for _, v := range c.Params {
+	for _, v := range *c.params {
 		m[v.Key] = []string{v.Value}
 	}
 	return binding.Uri.BindUri(m, obj)
@@ -1511,7 +1534,7 @@ func (c *context) SetAccepted(formats ...string) {
 // hasRequestContext 返回c.Request是否有Context和 ContextWithFallback是否为true
 func (c *context) hasRequestContext() bool {
 	hasFallback := c.engine != nil && c.engine.ContextWithFallback
-	hasRequestContext := c.Request != nil && c.Request().Context() != nil
+	hasRequestContext := c.request != nil && c.Request().Context() != nil
 	return hasFallback && hasRequestContext
 }
 
