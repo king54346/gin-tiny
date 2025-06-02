@@ -51,14 +51,14 @@ func main() {
 	r.Run(":8080")
 }
 
-func c(context *gin.Context) {
+func c(context *gin.context) {
 	context.String(200, "c")
 }
 
-func b(context *gin.Context) {
+func b(context *gin.context) {
 
 }
 
-func a(context *gin.Context) {
+func a(context *gin.context) {
 	context.String(200, "a")
 }

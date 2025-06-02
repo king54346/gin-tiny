@@ -160,7 +160,7 @@ type Engine struct {
 	noRoute        HandlersChain
 	noMethod       HandlersChain
 	pool           sync.Pool
-	trees          methodTrees
+	trees          *methodTrees
 	maxParams      uint16
 	maxSections    uint16
 	trustedProxies []string
@@ -196,7 +196,7 @@ func New() *Engine {
 		RemoveExtraSlash:       false,
 		UnescapePathValues:     true,
 		MaxMultipartMemory:     defaultMultipartMemory,
-		trees:                  make(methodTrees, 0, 9),
+		trees:                  newMethodTrees(),
 		secureJSONPrefix:       "while(1);",
 		trustedProxies:         []string{"0.0.0.0/0", "::/0"},
 		trustedCIDRs:           defaultTrustedCIDRs,
@@ -276,12 +276,13 @@ func (engine *Engine) addRoute(method, path string, handlers HandlersChain) {
 	assert1(len(handlers) > 0, "there must be at least one handler")
 
 	debugPrintRoute(method, path, handlers)
+
 	// 获取对应方法的路由树根节点
-	root := engine.trees.get(method)
+	root := engine.trees.getMethodTree(method)
 	if root == nil {
 		root = new(node)
 		root.fullPath = "/"
-		engine.trees = append(engine.trees, methodTree{method: method, root: root})
+		engine.trees.initMethodTree(methodTree{method: method, root: root})
 	}
 	root.addRoute(path, handlers)
 
@@ -295,10 +296,29 @@ func (engine *Engine) addRoute(method, path string, handlers HandlersChain) {
 	}
 }
 
-// Routes returns a slice of registered routes, including some useful information, such as:
-// the http method, path and the handler name.
+// 添加多方法和静态的路由
+func (engine *Engine) addOtherRoute(method, path string, handlers HandlersChain) {
+	assert1(path[0] == '/', "path must begin with '/'")
+	assert1(method != "", "HTTP method can not be empty")
+	assert1(len(handlers) > 0, "there must be at least one handler")
+
+	debugPrintRoute(method, path, handlers)
+
+	engine.trees.addStaticRouter(method, path, handlers)
+
+	// 计算路径中的参数数量
+	if paramsCount := countParams(path); paramsCount > engine.maxParams {
+		engine.maxParams = paramsCount
+	}
+	// 计算路径中的路径段数量
+	if sectionsCount := countSections(path); sectionsCount > engine.maxSections {
+		engine.maxSections = sectionsCount
+	}
+}
+
+// Routes 用于获取引擎中所有已注册的路由信息，返回RoutesInfo
 func (engine *Engine) Routes() (routes RoutesInfo) {
-	for _, tree := range engine.trees {
+	for _, tree := range engine.trees.getNotNullMethodTree() {
 		routes = iterate("", tree.method, routes, tree.root)
 	}
 	return routes
@@ -551,40 +571,49 @@ func (engine *Engine) handleHTTPRequest(c *context) {
 	if engine.RemoveExtraSlash {
 		rPath = cleanPath(rPath)
 	}
-
-	// Find root of the tree for the given HTTP method
+	// 找到对应HTTP方法的路由树
 	t := engine.trees
-	for i, tl := 0, len(t); i < tl; i++ {
-		if t[i].method != httpMethod {
-			continue
-		}
-		root := t[i].root
-		// 从路由树中查找handlers
-		value := root.getValue(rPath, c.params, c.skippedNodes, unescape)
-		if value.params != nil {
-			c.params = value.params
-		}
-		if value.handlers != nil {
-			c.handlers = value.handlers
-			c.fullPath = value.fullPath
+	// 先通过staticRouter查找
+	handlers, exist := t.findHanders(rPath, httpMethod)
+	if exist {
+		if handlers != nil {
+			c.handlers = handlers
+			c.fullPath = rPath
 			c.Next()
 			c.writermem.WriteHeaderNow()
 			return
 		}
-		if httpMethod != http.MethodConnect && rPath != "/" {
-			if value.tsr && engine.RedirectTrailingSlash {
-				redirectTrailingSlash(c)
+	} else {
+		methodTree := t.getMethodTree(httpMethod)
+		if methodTree != nil {
+			root := methodTree
+			// 从路由树中查找handlers
+			value := root.getValue(rPath, c.params, c.skippedNodes, unescape)
+			if value.params != nil {
+				c.params = value.params
+			}
+			if value.handlers != nil {
+				c.handlers = value.handlers
+				c.fullPath = value.fullPath
+				c.Next()
+				c.writermem.WriteHeaderNow()
 				return
 			}
-			if engine.RedirectFixedPath && redirectFixedPath(c, root, engine.RedirectFixedPath) {
-				return
+			if httpMethod != http.MethodConnect && rPath != "/" {
+				if value.tsr && engine.RedirectTrailingSlash {
+					redirectTrailingSlash(c)
+					return
+				}
+				// 处理固定路径重定向 例如将 /FOO 重定向到 /foo，或者处理多余斜杠如 //foo 重定向到 /foo
+				if engine.RedirectFixedPath && redirectFixedPath(c, root, engine.RedirectFixedPath) {
+					return
+				}
 			}
 		}
-		break
 	}
-
+	// 处理 405 Method Not Allowed
 	if engine.HandleMethodNotAllowed {
-		for _, tree := range engine.trees {
+		for _, tree := range t.getNotNullMethodTree() {
 			if tree.method == httpMethod {
 				continue
 			}
@@ -601,6 +630,7 @@ func (engine *Engine) handleHTTPRequest(c *context) {
 
 var mimePlain = []string{MIMEPlain}
 
+// serveError 是一个通用的错误处理函数，用于在处理请求时发生错误时返回相应的 HTTP 状态码和默认消息。
 func serveError(c *context, code int, defaultMessage []byte) {
 	c.writermem.status = code
 	c.Next()

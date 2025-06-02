@@ -7,6 +7,7 @@ package ginTiny
 import (
 	"bytes"
 	"gin-tiny/internal/bytesconv"
+	"net/http"
 	"net/url"
 	"strings"
 	"unicode"
@@ -30,7 +31,7 @@ type Param struct {
 // It is therefore safe to read values by the index.
 type Params []Param
 
-// Get方法返回第一个匹配的参数值和一个布尔值，如果没有找到匹配的参数，则返回空字符串和布尔值false
+// Get 方法返回第一个匹配的参数值和一个布尔值，如果没有找到匹配的参数，则返回空字符串和布尔值false
 // 注意：如果有多个参数具有相同的key，Get方法只会返回第一个匹配的参数值。
 func (ps Params) Get(name string) (string, bool) {
 	for _, entry := range ps {
@@ -60,34 +61,246 @@ func (ps Params) Copy() Params {
 
 // http的请求方法Get，Post等
 type methodTree struct {
-	method       string
-	root         *node
-	staticRouter map[string]HandlersChain //todo
+	method string
+	root   *node // 先通过 methodTrees.get方法获取对应的路由树，在通过addRoute方法添加到路由树中
 }
 
-type methodTrees []methodTree
+type supportMethodsHandlers struct {
+	handers          HandlersChain // 支持的HTTP方法对应的处理程序链
+	supportedMethods uint16
+}
+
+type methodTrees struct {
+	connect      *methodTree
+	delete       *methodTree
+	get          *methodTree
+	head         *methodTree
+	options      *methodTree
+	patch        *methodTree
+	post         *methodTree
+	put          *methodTree
+	trace        *methodTree
+	anyOther     map[string]*methodTree            // 存储其他HTTP方法的路由树
+	allowHeader  string                            // 用于存储允许的请求头
+	staticRouter map[string]supportMethodsHandlers // 存储静态路由或多个http方法的处理程序
+}
+
+// todo 优化
+const (
+	MethodConnect = 1 << iota
+	MethodDelete
+	MethodGet
+	MethodHead
+	MethodOptions
+	MethodPatch
+	MethodPost
+	MethodPut
+	MethodTrace
+)
+
+// 方法名到位掩码的映射
+var methodToBitmask = map[string]uint16{
+	http.MethodConnect: MethodConnect,
+	http.MethodDelete:  MethodDelete,
+	http.MethodGet:     MethodGet,
+	http.MethodHead:    MethodHead,
+	http.MethodOptions: MethodOptions,
+	http.MethodPatch:   MethodPatch,
+	http.MethodPost:    MethodPost,
+	http.MethodPut:     MethodPut,
+	http.MethodTrace:   MethodTrace,
+}
+
+// IsMethodSupported 检查给定的HTTP方法是否被支持
+func (smh *supportMethodsHandlers) IsMethodSupported(method string) bool {
+	// 首先检查标准方法（位运算，最快）
+	if bitmask, isStandard := methodToBitmask[method]; isStandard {
+		return smh.supportedMethods&bitmask != 0
+	}
+	return false
+}
+
+// findHanders 在muchOrStaticRouter中查找指定路径和方法的处理程序链
+func (trees *methodTrees) findHanders(path, method string) (HandlersChain, bool) {
+	// 1. 检查路径
+	pathHandlers, pathExists := trees.staticRouter[path]
+	if !pathExists {
+		return nil, false // 404
+	}
+
+	// 2. 检查方法
+	if !pathHandlers.IsMethodSupported(method) {
+		return nil, false // 405
+	}
+
+	return pathHandlers.handers, true
+}
+
+func (trees *methodTrees) addStaticRouter(method string, path string, handlers HandlersChain) {
+	if trees.staticRouter == nil {
+		trees.staticRouter = make(map[string]supportMethodsHandlers)
+	}
+
+	// 检查路径是否已存在
+	if pathHandlers, exists := trees.staticRouter[path]; exists {
+		// 如果路径已存在，更新处理程序和支持的方法
+		pathHandlers.handers = handlers
+		pathHandlers.supportedMethods |= methodToBitmask[method]
+		trees.staticRouter[path] = pathHandlers
+	} else {
+		// 如果路径不存在，创建新的条目
+		trees.staticRouter[path] = supportMethodsHandlers{
+			handers:          handlers,
+			supportedMethods: methodToBitmask[method],
+		}
+	}
+}
+
+func newMethodTrees() *methodTrees {
+	trees := &methodTrees{
+		anyOther: make(map[string]*methodTree),
+	}
+
+	return trees
+}
+
+// getNotNullMethodTree 返回一个包含所有非空方法树的切片
+func (trees *methodTrees) getNotNullMethodTree() []*methodTree {
+	if trees == nil {
+		return nil
+	}
+
+	// 预分配足够的容量以避免多次扩容
+	t := make([]*methodTree, 0, 9+len(trees.anyOther))
+
+	// 使用标准HTTP方法的数组来简化代码
+	standardMethods := [...]*methodTree{
+		trees.connect,
+		trees.delete,
+		trees.get,
+		trees.head,
+		trees.options,
+		trees.patch,
+		trees.post,
+		trees.put,
+		trees.trace,
+	}
+
+	// 添加所有非nil的标准HTTP方法
+	for _, tree := range standardMethods {
+		if tree != nil {
+			t = append(t, tree)
+		}
+	}
+
+	// 添加所有自定义HTTP方法
+	for _, tree := range trees.anyOther {
+		t = append(t, tree)
+	}
+	//// staticRouter中的路由方法
+	//for _, pathHandlers := range trees.staticRouter {
+	//	if pathHandlers.handers != nil {
+	//		t = append(t, &methodTree{
+	//			method: pathHandlers.handers,
+	//			root:   nil, // 静态路由没有对应的node树
+	//		})
+	//	}
+	//}
+
+	return t
+}
+
+func (trees *methodTrees) initMethodTree(tree methodTree) {
+	switch tree.method {
+	case http.MethodConnect:
+		trees.connect = &tree
+	case http.MethodDelete:
+		trees.delete = &tree
+	case http.MethodGet:
+		trees.get = &tree
+	case http.MethodHead:
+		trees.head = &tree
+	case http.MethodOptions:
+		trees.options = &tree
+	case http.MethodPatch:
+		trees.patch = &tree
+	case http.MethodPost:
+		trees.post = &tree
+	case http.MethodPut:
+		trees.put = &tree
+	case http.MethodTrace:
+		trees.trace = &tree
+	default:
+		if _, ok := trees.anyOther[tree.method]; !ok {
+			trees.anyOther[tree.method] = &tree
+		}
+	}
+}
 
 // 获取指定方法的路由树
-func (trees methodTrees) get(method string) *node {
-	for _, tree := range trees {
-		if tree.method == method {
+func (trees *methodTrees) getMethodTree(method string) *node {
+	if trees == nil {
+		return nil
+	}
+
+	switch method {
+	case http.MethodConnect:
+		if trees.connect != nil {
+			return trees.connect.root
+		}
+	case http.MethodDelete:
+		if trees.delete != nil {
+			return trees.delete.root
+		}
+	case http.MethodGet:
+		if trees.get != nil {
+			return trees.get.root
+		}
+	case http.MethodHead:
+		if trees.head != nil {
+			return trees.head.root
+		}
+	case http.MethodOptions:
+		if trees.options != nil {
+			return trees.options.root
+		}
+	case http.MethodPatch:
+		if trees.patch != nil {
+			return trees.patch.root
+		}
+	case http.MethodPost:
+		if trees.post != nil {
+			return trees.post.root
+		}
+	case http.MethodPut:
+		if trees.put != nil {
+			return trees.put.root
+		}
+	case http.MethodTrace:
+		if trees.trace != nil {
+			return trees.trace.root
+		}
+	default:
+		if tree, ok := trees.anyOther[method]; ok {
 			return tree.root
 		}
 	}
 	return nil
 }
 
-func min(a, b int) int {
-	if a <= b {
-		return a
-	}
-	return b
-}
+//func (trees methodTrees) get(method string) *node {
+//	for _, tree := range trees {
+//		if tree.method == method {
+//			return tree.root
+//		}
+//	}
+//	return nil
+//}
 
 func longestCommonPrefix(a, b string) int {
 	i := 0
-	max := min(len(a), len(b))
-	for i < max && a[i] == b[i] {
+	m := min(len(a), len(b))
+	for i < m && a[i] == b[i] {
 		i++
 	}
 	return i
@@ -422,7 +635,7 @@ func (n *node) insertChild(path string, fullPath string, handlers HandlersChain)
 type nodeValue struct {
 	handlers HandlersChain
 	params   *Params
-	tsr      bool
+	tsr      bool // 表示是否需要处理尾部斜杠重定向
 	fullPath string
 }
 
@@ -448,14 +661,15 @@ walk: // Outer loop for walking the tree
 		prefix := n.path
 		// 待匹配的path大于node.path
 		if len(path) > len(prefix) {
-			//前缀能匹配
+			// 前缀能匹配   /search/v1 能匹配/search
 			if path[:len(prefix)] == prefix {
 				//取匹配后半部分的path
 				path = path[len(prefix):]
 
-				// Try all the non-wildcard children first by matching the indices
+				// 路径匹配到末尾
 				idxc := path[0]
 				// 遍历当前的node.indices,找到首字母相同的node
+				// 例如：/search/v1. /searchone  indices = "/o"  idxc = 'o'
 				for i, c := range []byte(n.indices) {
 					if c == idxc {
 						//  strings.HasPrefix(n.children[len(n.children)-1].path, ":") == n.wildChild
@@ -598,7 +812,7 @@ walk: // Outer loop for walking the tree
 				}
 			}
 		}
-
+		//
 		if path == prefix {
 			// If the current path does not equal '/' and the node does not have a registered handle and the most recently matched node has a child node
 			// the current node needs to roll back to last valid skippedNode
@@ -654,11 +868,12 @@ walk: // Outer loop for walking the tree
 
 		// Nothing found. We can recommend to redirect to the same URL with an
 		// extra trailing slash if a leaf exists for that path
+		// 先判断是否可以建议尾部斜杠重定向
 		value.tsr = path == "/" ||
 			(len(prefix) == len(path)+1 && prefix[len(path)] == '/' &&
 				path == prefix[:len(prefix)-1] && n.handlers != nil)
 
-		// roll back to last valid skippedNode
+		// 如果不能，则尝试回退到之前跳过的节点，继续匹配，直到所有可能性都尝试完。
 		if !value.tsr && path != "/" {
 			for length := len(*skippedNodes); length > 0; length-- {
 				skippedNode := (*skippedNodes)[length-1]
@@ -679,10 +894,7 @@ walk: // Outer loop for walking the tree
 	}
 }
 
-// Makes a case-insensitive lookup of the given path and tries to find a handler.
-// It can optionally also fix trailing slashes.
-// It returns the case-corrected path and a bool indicating whether the lookup
-// was successful.
+// findCaseInsensitivePath 大小写不敏感路径查找
 func (n *node) findCaseInsensitivePath(path string, fixTrailingSlash bool) ([]byte, bool) {
 	const stackBufSize = 128
 

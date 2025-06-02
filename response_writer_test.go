@@ -5,17 +5,13 @@
 package ginTiny
 
 import (
+	"fmt"
 	"net/http"
 	"net/http/httptest"
 	"testing"
 
 	"github.com/stretchr/testify/assert"
 )
-
-// TODO
-// func (w *responseWriter) Hijack() (net.Conn, *bufio.ReadWriter, error) {
-// func (w *responseWriter) CloseNotify() <-chan bool {
-// func (w *responseWriter) Flush() {
 
 var (
 	_ ResponseWriter      = &responseWriter{}
@@ -150,4 +146,33 @@ func TestResponseWriterStatusCode(t *testing.T) {
 
 	// status must be 200 although we tried to change it
 	assert.Equal(t, http.StatusOK, w.Status())
+}
+
+func TestResponseMethod3(t *testing.T) {
+	fmt.Println("\n=== 方法3: 高级Response包装器测试 ===")
+	e := New()
+
+	e.GET("/", func(c Context) {
+
+		// Before
+		c.Response().Before(func() {
+			c.Header("Server", "gin")
+		})
+
+		// After
+		c.Response().After(func() {
+			c.Header("X-Frame-Options", "DENY")
+		})
+
+		c.Response().Write([]byte("test"))
+	})
+
+	req := httptest.NewRequest(http.MethodGet, "/", nil)
+	rec := httptest.NewRecorder()
+	e.ServeHTTP(rec, req)
+
+	assert.Equal(t, "gin", rec.Header().Get("Server"))
+	assert.Equal(t, "DENY", rec.Header().Get("X-Frame-Options"))
+	assert.Equal(t, "test", rec.Body.String())
+
 }

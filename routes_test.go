@@ -577,3 +577,51 @@ func TestEngineHandleMethodNotAllowedCornerCase(t *testing.T) {
 	w := PerformRequest(r, "GET", "/base/v1/user/groups")
 	assert.Equal(t, http.StatusNotFound, w.Code)
 }
+
+// todo 需要专门一个staticRouter 能够添加不同的method方法；
+func TestRouterGroupStaticRouter(t *testing.T) {
+	router := New()
+
+	// 创建一个计数器来记录处理器被调用的次数
+	var count int
+	handler := func(c Context) {
+		count++
+		c.String(http.StatusOK, "static router")
+	}
+
+	// 注册静态路由
+	router.StaticRouter("/static", handler)
+
+	// 测试所有HTTP方法
+	for _, method := range anyMethods {
+		w := httptest.NewRecorder()
+		req, _ := http.NewRequest(method, "/static", nil)
+		router.ServeHTTP(w, req)
+
+		assert.Equal(t, http.StatusOK, w.Code)
+		assert.Equal(t, "static router", w.Body.String())
+	}
+
+	// 验证处理器被调用的次数等于HTTP方法的数量
+	assert.Equal(t, len(anyMethods), count)
+
+	// 测试嵌套路由组中的静态路由
+	group := router.Group("/api")
+
+	// 重置计数器
+	count = 0
+
+	group.StaticRouter("/static", handler)
+
+	for _, method := range anyMethods {
+		w := httptest.NewRecorder()
+		req, _ := http.NewRequest(method, "/api/static", nil)
+		router.ServeHTTP(w, req)
+
+		assert.Equal(t, http.StatusOK, w.Code)
+		assert.Equal(t, "static router", w.Body.String())
+	}
+
+	// 验证处理器被调用的次数等于HTTP方法的数量
+	assert.Equal(t, len(anyMethods), count)
+}

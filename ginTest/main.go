@@ -1,10 +1,8 @@
 package main
 
 import (
-	"fmt"
 	gin "gin-tiny"
-	"io"
-	"time"
+	"net/http"
 )
 
 func main() {
@@ -28,22 +26,30 @@ func main() {
 	//router.Run(":8080")
 	r := gin.Default()
 
-	r.GET("/stream", func(c gin.Context) {
-		// Send a stream of data to the client.
-		now := time.Now().Unix()
-		c.Stream(func(w io.Writer) bool {
-			// Write the current time to the client every second.
-			println(time.Now().Unix() - now)
-			fmt.Fprintf(w, "Current time: %s\n", time.Now().Format(time.RFC1123))
-			time.Sleep(time.Second)
-			//如果超过10秒就返回false
-			if time.Now().Unix()-now > 100 {
-				return false
-			}
-			return true
+	r.Static("/static", "./ginTest/static")
+	// 方法2: 服务单个静态文件
+	// 访问路径: http://localhost:8080/favicon.ico
+	// 对应本地文件: ./assets/favicon.ico
+	// 方法1: 检查文件存在再设置路由
 
-		})
-	})
+	r.StaticFile("/favicon.ico", "./ginTest/assets/favicon.ico")
+
+	// 方法3: 使用StaticFS提供更多控制
+	// 访问路径: http://localhost:8080/assets/filename.ext
+	// 对应本地路径: ./public/filename.ext
+	r.StaticFS("/assets", http.Dir("./ginTest/public"))
+
+	r.StaticMatch(
+		[]string{"GET", "HEAD"},
+		"/test",
+		func(c gin.Context) {
+			c.JSON(200, gin.H{
+				"method":  c.Request().Method,
+				"message": "公开资源",
+			})
+		},
+	)
+	// StaticFile,StaticFileFS,Static,StaticFS
 
 	r.Run(":8080")
 

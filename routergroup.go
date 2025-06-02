@@ -15,7 +15,7 @@ var (
 	// regEnLetter matches english letters for http method name
 	regEnLetter = regexp.MustCompile("^[A-Z]+$")
 
-	// anyMethods 包含所有 HTTP 方法
+	// anyMethods for RouterGroup Any method
 	anyMethods = []string{
 		http.MethodGet, http.MethodPost, http.MethodPut, http.MethodPatch,
 		http.MethodHead, http.MethodOptions, http.MethodDelete, http.MethodConnect,
@@ -24,6 +24,7 @@ var (
 )
 
 // IRouter 定义所有路由handle接口包括单个和组路由
+// 使用例如 router.Group()...
 type IRouter interface {
 	IRoutes
 	Group(string, ...HandlerFunc) *RouterGroup
@@ -72,20 +73,24 @@ func (group *RouterGroup) Group(relativePath string, handlers ...HandlerFunc) *R
 	}
 }
 
-// BasePath returns the base path of router group.
-// For example, if v := router.Group("/rest/n/v1/api"), v.BasePath() is "/rest/n/v1/api".
-func (group *RouterGroup) BasePath() string {
-	return group.basePath
-}
-
-// HTTP 路由注册到框架的路由表中，并处理好路径和中间件的合并
+// BasePath 这个方法用于获取当前路由组的基础路径
+// 例如，如果 v := router.Group("/rest/n/v1/api")，则 v.BasePath() 返回 "/rest/n/v1/api"。
 func (group *RouterGroup) handle(httpMethod, relativePath string, handlers HandlersChain) IRoutes {
 	// 计算绝对路径
 	absolutePath := group.calculateAbsolutePath(relativePath)
 	// 合并handlers
 	handlers = group.combineHandlers(handlers)
-	// 添加路由
 	group.engine.addRoute(httpMethod, absolutePath, handlers)
+	return group.returnObj()
+}
+
+func (group *RouterGroup) handleStatic(httpMethod, relativePath string, handlers HandlersChain) IRoutes {
+	// 计算绝对路径
+	absolutePath := group.calculateAbsolutePath(relativePath)
+	// 合并handlers
+	handlers = group.combineHandlers(handlers)
+	clean := path.Clean(absolutePath)
+	group.engine.addOtherRoute(httpMethod, clean, handlers)
 	return group.returnObj()
 }
 
@@ -102,7 +107,7 @@ func (group *RouterGroup) POST(relativePath string, handlers ...HandlerFunc) IRo
 	return group.handle(http.MethodPost, relativePath, handlers)
 }
 
-// GET is a shortcut for router.Handle("GET", path, handlers).
+// GET 是一个快捷方式，用于注册 GET 请求的处理函数。
 func (group *RouterGroup) GET(relativePath string, handlers ...HandlerFunc) IRoutes {
 	return group.handle(http.MethodGet, relativePath, handlers)
 }
@@ -132,7 +137,6 @@ func (group *RouterGroup) HEAD(relativePath string, handlers ...HandlerFunc) IRo
 	return group.handle(http.MethodHead, relativePath, handlers)
 }
 
-// Any 方法让同一路径支持所有 HTTP 请求方式。
 func (group *RouterGroup) Any(relativePath string, handlers ...HandlerFunc) IRoutes {
 	for _, method := range anyMethods {
 		group.handle(method, relativePath, handlers)
@@ -141,9 +145,19 @@ func (group *RouterGroup) Any(relativePath string, handlers ...HandlerFunc) IRou
 	return group.returnObj()
 }
 
+// StaticRouter 方法用于注册一个静态路由，支持所有 HTTP 方法。
 func (group *RouterGroup) StaticRouter(relativePath string, handlers ...HandlerFunc) IRoutes {
 	for _, method := range anyMethods {
-		group.handle(method, relativePath, handlers)
+		group.handleStatic(method, relativePath, handlers)
+	}
+
+	return group.returnObj()
+}
+
+// StaticMatch 将静态路由注册到Map上而不是radixTree上
+func (group *RouterGroup) StaticMatch(methods []string, relativePath string, handlers ...HandlerFunc) IRoutes {
+	for _, method := range methods {
+		group.handleStatic(method, relativePath, handlers)
 	}
 
 	return group.returnObj()
@@ -160,15 +174,16 @@ func (group *RouterGroup) Match(methods []string, relativePath string, handlers 
 	return group.returnObj()
 }
 
+// StaticFile 注册一个静态文件处理器，允许直接访问指定的文件。
 func (group *RouterGroup) StaticFile(relativePath, filepath string) IRoutes {
 	return group.staticFileHandler(relativePath, func(c Context) {
 		c.File(filepath)
 	})
 }
 
-// StaticFileFS works just like `StaticFile` but a custom `http.FileSystem` can be used instead..
-// router.StaticFileFS("favicon.ico", "./resources/favicon.ico", Dir{".", false})
-// Gin by default uses: gin.Dir()
+// StaticFileFS 工作方式与 `StaticFile` 类似，但可以使用自定义的 `http.FileSystem`。
+// 例如：router.StaticFileFS("favicon.ico", "./resources/favicon.ico", Dir{".", false})
+// 这允许你使用内存中的文件、嵌入的文件或其他实现了 `http.FileSystem` 接口的资源。
 func (group *RouterGroup) StaticFileFS(relativePath, filepath string, fs http.FileSystem) IRoutes {
 	return group.staticFileHandler(relativePath, func(c Context) {
 		c.FileFromFS(filepath, fs)
@@ -179,8 +194,10 @@ func (group *RouterGroup) staticFileHandler(relativePath string, handler Handler
 	if strings.Contains(relativePath, ":") || strings.Contains(relativePath, "*") {
 		panic("URL parameters can not be used when serving a static file")
 	}
-	group.GET(relativePath, handler)
-	group.HEAD(relativePath, handler)
+	group.handleStatic(http.MethodGet, relativePath, HandlersChain{handler})
+	group.handleStatic(http.MethodHead, relativePath, HandlersChain{handler})
+	//group.GET(relativePath, handler)
+	//group.HEAD(relativePath, handler)
 	return group.returnObj()
 }
 
@@ -195,7 +212,7 @@ func (group *RouterGroup) Static(relativePath, root string) IRoutes {
 	return group.StaticFS(relativePath, Dir(root, false))
 }
 
-// 不是为一个物理目录服务，而是为 http.FileSystem 接口提供服务。这是一个更灵活的方法，允许你为内存中的文件、嵌入的文件或其他实现了 http.FileSystem 接口的资源提供服务
+// StaticFS 不是为一个物理目录服务，而是为 http.FileSystem 接口提供服务。这是一个更灵活的方法，允许你为内存中的文件、嵌入的文件或其他实现了 http.FileSystem 接口的资源提供服务
 func (group *RouterGroup) StaticFS(relativePath string, fs http.FileSystem) IRoutes {
 	if strings.Contains(relativePath, ":") || strings.Contains(relativePath, "*") {
 		panic("URL parameters can not be used when serving a static folder")
