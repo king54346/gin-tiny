@@ -121,7 +121,7 @@ func (smh *supportMethodsHandlers) IsMethodSupported(method string) bool {
 }
 
 // findHanders 在muchOrStaticRouter中查找指定路径和方法的处理程序链
-func (trees *methodTrees) findHanders(path, method string) (HandlersChain, bool) {
+func (trees *methodTrees) findHandlers(path, method string) (HandlersChain, bool) {
 	// 1. 检查路径
 	pathHandlers, pathExists := trees.staticRouter[path]
 	if !pathExists {

@@ -574,7 +574,7 @@ func (engine *Engine) handleHTTPRequest(c *context) {
 	// 找到对应HTTP方法的路由树
 	t := engine.trees
 	// 先通过staticRouter查找
-	handlers, exist := t.findHanders(rPath, httpMethod)
+	handlers, exist := t.findHandlers(rPath, httpMethod)
 	if exist {
 		if handlers != nil {
 			c.handlers = handlers

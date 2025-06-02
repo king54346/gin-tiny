@@ -41,9 +41,13 @@ type ResponseWriter interface {
 	// WriteHeaderNow forces to write the http header (status code + headers).
 	WriteHeaderNow()
 
+	Write(data []byte) (n int, err error)
+
+	WriteHeader(int)
+
+	Header() http.Header
 	// Pusher get the http.Pusher for server push
 	Pusher() http.Pusher
-
 	// Before registers a function to be called before WriteHeaderNow.
 	Before(func())
 	// After registers a function to be called after Write.
@@ -77,13 +81,14 @@ func (w *responseWriter) Unwrap() http.ResponseWriter {
 }
 
 func (w *responseWriter) reset(writer http.ResponseWriter) {
+	w.beforeFuncs = make([]func(), 0, 4)
+	w.afterFuncs = make([]func(), 0, 4)
 	w.ResponseWriter = writer
 	w.size = noWritten
 	w.status = defaultStatus
 }
 
 func (w *responseWriter) WriteHeader(code int) {
-	// 如果 code 小于等于 0，则不写入响应头, 如果 status 已经被设置为 code，则不做任何操作
 	if code > 0 && w.status != code {
 		if w.Written() {
 			// 直接返回，不做任何操作
@@ -91,24 +96,26 @@ func (w *responseWriter) WriteHeader(code int) {
 			return
 		}
 		w.status = code
-
-	}
-	for _, fn := range w.beforeFuncs {
-		fn()
 	}
 }
 
 func (w *responseWriter) WriteHeaderNow() {
 	if !w.Written() {
 		w.size = 0
-		w.WriteHeader(w.status)
+		for _, fn := range w.beforeFuncs {
+			fn()
+		}
+		w.ResponseWriter.WriteHeader(w.status)
 	}
+}
+
+func (w *responseWriter) Header() http.Header {
+	return w.ResponseWriter.Header()
 }
 
 func (w *responseWriter) Before(fn func()) {
 	w.beforeFuncs = append(w.beforeFuncs, fn)
 }
-
 func (w *responseWriter) After(fn func()) {
 	w.afterFuncs = append(w.afterFuncs, fn)
 }

@@ -1,7 +1,6 @@
 // Copyright 2014 Manu Martinez-Almeida. All rights reserved.
 // Use of this source code is governed by a MIT style
 // license that can be found in the LICENSE file.
-
 package ginTiny
 
 import (
@@ -17,77 +16,77 @@ func init() {
 
 func TestRouterGroupBasic(t *testing.T) {
 	router := New()
-	group := router.Group("/hola", func(c *context) {})
-	group.Use(func(c *context) {})
+	group := router.Group("/hola", func(c Context) {})
+	group.Use(func(c Context) {})
 
 	assert.Len(t, group.Handlers, 2)
-	assert.Equal(t, "/hola", group.BasePath())
+	assert.Equal(t, "/hola", group.basePath)
 	assert.Equal(t, router, group.engine)
 
 	group2 := group.Group("manu")
-	group2.Use(func(c *context) {}, func(c *context) {})
+	group2.Use(func(c Context) {}, func(c Context) {})
 
 	assert.Len(t, group2.Handlers, 4)
-	assert.Equal(t, "/hola/manu", group2.BasePath())
+	assert.Equal(t, "/hola/manu", group2.basePath)
 	assert.Equal(t, router, group2.engine)
 }
 
-//func TestRouterGroupBasicHandle(t *testing.T) {
-//	performRequestInGroup(t, http.MethodGet)
-//	performRequestInGroup(t, http.MethodPost)
-//	performRequestInGroup(t, http.MethodPut)
-//	performRequestInGroup(t, http.MethodPatch)
-//	performRequestInGroup(t, http.MethodDelete)
-//	performRequestInGroup(t, http.MethodHead)
-//	performRequestInGroup(t, http.MethodOptions)
-//}
+func TestRouterGroupBasicHandle(t *testing.T) {
+	performRequestInGroup(t, http.MethodGet)
+	performRequestInGroup(t, http.MethodPost)
+	performRequestInGroup(t, http.MethodPut)
+	performRequestInGroup(t, http.MethodPatch)
+	performRequestInGroup(t, http.MethodDelete)
+	performRequestInGroup(t, http.MethodHead)
+	performRequestInGroup(t, http.MethodOptions)
+}
 
-//func performRequestInGroup(t *testing.T, method string) {
-//	router := New()
-//	v1 := router.Group("v1", func(c *context) {})
-//	assert.Equal(t, "/v1", v1.BasePath())
-//
-//	login := v1.Group("/login/", func(c *context) {}, func(c *context) {})
-//	assert.Equal(t, "/v1/login/", login.BasePath())
-//
-//	handler := func(c *context) {
-//		c.String(http.StatusBadRequest, "the method was %s and index %d", c.Request.Method, c.index)
-//	}
-//
-//	switch method {
-//	case http.MethodGet:
-//		v1.GET("/test", handler)
-//		login.GET("/test", handler)
-//	case http.MethodPost:
-//		v1.POST("/test", handler)
-//		login.POST("/test", handler)
-//	case http.MethodPut:
-//		v1.PUT("/test", handler)
-//		login.PUT("/test", handler)
-//	case http.MethodPatch:
-//		v1.PATCH("/test", handler)
-//		login.PATCH("/test", handler)
-//	case http.MethodDelete:
-//		v1.DELETE("/test", handler)
-//		login.DELETE("/test", handler)
-//	case http.MethodHead:
-//		v1.HEAD("/test", handler)
-//		login.HEAD("/test", handler)
-//	case http.MethodOptions:
-//		v1.OPTIONS("/test", handler)
-//		login.OPTIONS("/test", handler)
-//	default:
-//		panic("unknown method")
-//	}
-//
-//	w := PerformRequest(router, method, "/v1/login/test")
-//	assert.Equal(t, http.StatusBadRequest, w.Code)
-//	assert.Equal(t, "the method was "+method+" and index 3", w.Body.String())
-//
-//	w = PerformRequest(router, method, "/v1/test")
-//	assert.Equal(t, http.StatusBadRequest, w.Code)
-//	assert.Equal(t, "the method was "+method+" and index 1", w.Body.String())
-//}
+func performRequestInGroup(t *testing.T, method string) {
+	router := New()
+	v1 := router.Group("v1", func(c Context) {})
+	assert.Equal(t, "/v1", v1.basePath)
+
+	login := v1.Group("/login/", func(c Context) {}, func(c Context) {})
+	assert.Equal(t, "/v1/login/", login.basePath)
+
+	handler := func(c Context) {
+		c.String(http.StatusBadRequest, "the method was %s", c.Request().Method)
+	}
+
+	switch method {
+	case http.MethodGet:
+		v1.GET("/test", handler)
+		login.GET("/test", handler)
+	case http.MethodPost:
+		v1.POST("/test", handler)
+		login.POST("/test", handler)
+	case http.MethodPut:
+		v1.PUT("/test", handler)
+		login.PUT("/test", handler)
+	case http.MethodPatch:
+		v1.PATCH("/test", handler)
+		login.PATCH("/test", handler)
+	case http.MethodDelete:
+		v1.DELETE("/test", handler)
+		login.DELETE("/test", handler)
+	case http.MethodHead:
+		v1.HEAD("/test", handler)
+		login.HEAD("/test", handler)
+	case http.MethodOptions:
+		v1.OPTIONS("/test", handler)
+		login.OPTIONS("/test", handler)
+	default:
+		panic("unknown method")
+	}
+
+	w := PerformRequest(router, method, "/v1/login/test")
+	assert.Equal(t, http.StatusBadRequest, w.Code)
+	assert.Equal(t, "the method was "+method+"", w.Body.String())
+
+	w = PerformRequest(router, method, "/v1/test")
+	assert.Equal(t, http.StatusBadRequest, w.Code)
+	assert.Equal(t, "the method was "+method+"", w.Body.String())
+}
 
 func TestRouterGroupTooManyHandlers(t *testing.T) {
 	const (
@@ -141,7 +140,7 @@ func TestRouterGroupPipeline(t *testing.T) {
 }
 
 func testRoutesInterface(t *testing.T, r IRoutes) {
-	handler := func(c *context) {}
+	handler := func(c Context) {}
 	assert.Equal(t, r, r.Use(handler))
 	assert.Equal(t, r, r.Handle(http.MethodGet, "/handler", handler))
 	assert.Equal(t, r, r.Any("/any", handler))

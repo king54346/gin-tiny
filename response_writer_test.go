@@ -47,9 +47,9 @@ func TestResponseWriterReset(t *testing.T) {
 
 func TestResponseWriterWriteHeader(t *testing.T) {
 	testWriter := httptest.NewRecorder()
-	writer := &responseWriter{}
-	writer.reset(testWriter)
-	w := ResponseWriter(writer)
+	w := NewResponseWriter(testWriter)
+	//writer.reset(&testWriter)
+	//w := ResponseWriter(&writer)
 
 	w.WriteHeader(http.StatusMultipleChoices)
 	assert.False(t, w.Written())
