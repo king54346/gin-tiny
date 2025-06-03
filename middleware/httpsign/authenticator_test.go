@@ -49,11 +49,11 @@ var (
 	requestTime     = time.Date(2018, time.October, 22, 0o7, 0o0, 0o7, 0o0, time.UTC)
 )
 
-func runTest(secretKeys Secrets, headers []string, v []validator.Validator, req *http.Request) *gin.context {
+func runTest(secretKeys Secrets, headers []string, v []validator.Validator, req *http.Request) gin.Context {
 	gin.SetMode(gin.TestMode)
 	auth := NewAuthenticator(secretKeys, WithRequiredHeaders(headers), WithValidator(v...))
 	c, _ := gin.CreateTestContext(httptest.NewRecorder())
-	c.Request = req
+	c.SetRequest(req)
 	auth.Authenticated()(c)
 	return c
 }
@@ -69,8 +69,8 @@ func TestAuthenticatedHeaderNoSignature(t *testing.T) {
 	req, err := http.NewRequestWithContext(context.Background(), "GET", "/", nil)
 	require.NoError(t, err)
 	c := runTest(secrets, requiredHeaders, nil, req)
-	assert.Equal(t, http.StatusUnauthorized, c.Writer.Status())
-	assert.Equal(t, ErrNoSignature, c.Errors[0])
+	assert.Equal(t, http.StatusUnauthorized, c.Response().Status())
+	assert.Equal(t, ErrNoSignature, c.Errors()[0])
 }
 
 func TestAuthenticatedHeaderInvalidSignature(t *testing.T) {
@@ -78,8 +78,8 @@ func TestAuthenticatedHeaderInvalidSignature(t *testing.T) {
 	require.NoError(t, err)
 	req.Header.Set(authorizationHeader, "hello")
 	c := runTest(secrets, requiredHeaders, nil, req)
-	assert.Equal(t, http.StatusUnauthorized, c.Writer.Status())
-	assert.Equal(t, ErrInvalidAuthorizationHeader, c.Errors[0])
+	assert.Equal(t, http.StatusUnauthorized, c.Response().Status())
+	assert.Equal(t, ErrInvalidAuthorizationHeader, c.Errors()[0])
 }
 
 func TestAuthenticatedHeaderWrongKey(t *testing.T) {
@@ -89,8 +89,8 @@ func TestAuthenticatedHeaderWrongKey(t *testing.T) {
 	req.Header.Set(authorizationHeader, sigHeader)
 	req.Header.Set("Date", time.Now().UTC().Format(http.TimeFormat))
 	c := runTest(secrets, requiredHeaders, nil, req)
-	assert.Equal(t, http.StatusUnauthorized, c.Writer.Status())
-	assert.Equal(t, ErrInvalidKeyID, c.Errors[0])
+	assert.Equal(t, http.StatusUnauthorized, c.Response().Status())
+	assert.Equal(t, ErrInvalidKeyID, c.Errors()[0])
 }
 
 func TestAuthenticateDateNotAccept(t *testing.T) {
@@ -100,8 +100,8 @@ func TestAuthenticateDateNotAccept(t *testing.T) {
 	req.Header.Set(authorizationHeader, sigHeader)
 	req.Header.Set("Date", time.Date(1990, time.October, 20, 0, 0, 0, 0, time.UTC).Format(http.TimeFormat))
 	c := runTest(secrets, requiredHeaders, nil, req)
-	assert.Equal(t, http.StatusBadRequest, c.Writer.Status())
-	assert.Equal(t, validator.ErrDateNotInRange, c.Errors[0])
+	assert.Equal(t, http.StatusBadRequest, c.Response().Status())
+	assert.Equal(t, validator.ErrDateNotInRange, c.Errors()[0])
 }
 
 func TestAuthenticateInvalidRequiredHeader(t *testing.T) {
@@ -114,8 +114,8 @@ func TestAuthenticateInvalidRequiredHeader(t *testing.T) {
 	req.Header.Set("Date", time.Now().UTC().Format(http.TimeFormat))
 
 	c := runTest(secrets, requiredHeaders, nil, req)
-	assert.Equal(t, http.StatusBadRequest, c.Writer.Status())
-	assert.Equal(t, ErrHeaderNotEnough, c.Errors[0])
+	assert.Equal(t, http.StatusBadRequest, c.Response().Status())
+	assert.Equal(t, ErrHeaderNotEnough, c.Errors()[0])
 }
 
 func TestAuthenticateInvalidAlgo(t *testing.T) {
@@ -126,8 +126,8 @@ func TestAuthenticateInvalidAlgo(t *testing.T) {
 	req.Header.Set("Date", time.Now().UTC().Format(http.TimeFormat))
 
 	c := runTest(secrets, requiredHeaders, nil, req)
-	assert.Equal(t, http.StatusBadRequest, c.Writer.Status())
-	assert.Equal(t, ErrIncorrectAlgorithm, c.Errors[0])
+	assert.Equal(t, http.StatusBadRequest, c.Response().Status())
+	assert.Equal(t, ErrIncorrectAlgorithm, c.Errors()[0])
 }
 
 func TestInvalidSign(t *testing.T) {
@@ -138,8 +138,8 @@ func TestInvalidSign(t *testing.T) {
 	req.Header.Set("Date", time.Now().UTC().Format(http.TimeFormat))
 
 	c := runTest(secrets, requiredHeaders, nil, req)
-	assert.Equal(t, http.StatusUnauthorized, c.Writer.Status())
-	assert.Equal(t, ErrInvalidSign, c.Errors[0])
+	assert.Equal(t, http.StatusUnauthorized, c.Response().Status())
+	assert.Equal(t, ErrInvalidSign, c.Errors()[0])
 }
 
 // mock interface always return true
@@ -152,14 +152,14 @@ var mockValidator = []validator.Validator{
 	validator.NewDigestValidator(),
 }
 
-func httpTestGet(c *gin.context) {
+func httpTestGet(c gin.Context) {
 	c.JSON(http.StatusOK,
 		gin.H{
 			"success": true,
 		})
 }
 
-func httpTestPost(c *gin.context) {
+func httpTestPost(c gin.Context) {
 	body, err := c.GetRawData()
 	if err != nil {
 		c.AbortWithStatus(http.StatusInternalServerError)

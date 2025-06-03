@@ -30,7 +30,7 @@ func WithResponse(h gin.HandlerFunc) Option {
 	}
 }
 
-func defaultResponse(c *gin.Context) {
+func defaultResponse(c gin.Context) {
 	c.String(http.StatusRequestTimeout, http.StatusText(http.StatusRequestTimeout))
 }
 

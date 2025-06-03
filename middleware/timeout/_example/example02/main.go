@@ -10,14 +10,14 @@ import (
 	gin "gin-tiny"
 )
 
-func testResponse(c *gin.Context) {
+func testResponse(c *gin.context) {
 	c.String(http.StatusRequestTimeout, "timeout")
 }
 
 func timeoutMiddleware() gin.HandlerFunc {
 	return timeout.New(
 		timeout.WithTimeout(500*time.Millisecond),
-		timeout.WithHandler(func(c *gin.Context) {
+		timeout.WithHandler(func(c *gin.context) {
 			c.Next()
 		}),
 		timeout.WithResponse(testResponse),
@@ -27,7 +27,7 @@ func timeoutMiddleware() gin.HandlerFunc {
 func main() {
 	r := gin.New()
 	r.Use(timeoutMiddleware())
-	r.GET("/slow", func(c *gin.Context) {
+	r.GET("/slow", func(c *gin.context) {
 		time.Sleep(800 * time.Millisecond)
 		c.Status(http.StatusOK)
 	})

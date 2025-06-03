@@ -8,8 +8,8 @@ import (
 
 // Handler for gin framework
 func Handler() gin.HandlerFunc {
-	return func(c *gin.context) {
-		w := c.Writer
+	return func(c gin.Context) {
+		w := c.Response()
 		c.Header("Content-Type", "application/json; charset=utf-8")
 		_, _ = w.Write([]byte("{\n"))
 		first := true

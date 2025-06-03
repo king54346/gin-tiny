@@ -9,6 +9,7 @@ import (
 	"path/filepath"
 	"strings"
 	"sync"
+	"sync/atomic"
 )
 
 type gzipHandler struct {
@@ -35,27 +36,41 @@ func newGzipHandler(level int, options ...Option) *gzipHandler {
 	return handler
 }
 
-func (g *gzipHandler) Handle(c *gin.context) {
-	if fn := g.DecompressFn; fn != nil && c.Request.Header.Get("Content-Encoding") == "gzip" {
+func (g *gzipHandler) Handle(c gin.Context) {
+	if fn := g.DecompressFn; fn != nil && c.Request().Header.Get("Content-Encoding") == "gzip" {
 		fn(c)
 	}
 
-	if !g.shouldCompress(c.Request) {
+	if !g.shouldCompress(c.Request()) {
 		return
 	}
 
 	gz := g.gzPool.Get().(*gzip.Writer)
 	defer g.gzPool.Put(gz)
 	defer gz.Reset(ioutil.Discard)
-	gz.Reset(c.Writer)
+
+	// 创建计数器来跟踪压缩后的大小
+	counter := &countingWriter{ResponseWriter: c.Response()}
+	gz.Reset(counter)
 
 	c.Header("Content-Encoding", "gzip")
 	c.Header("Vary", "Accept-Encoding")
-	c.Writer = &gzipWriter{c.Writer, gz}
+
+	// 创建 gzipWriter
+	gzWriter := &gzipWriter{
+		ResponseWriter: c.Response(),
+		writer:         gz, // countingWriter用于跟踪压缩后的大小
+	}
+
+	// 使用 SetResponse 方法
+	c.SetResponse(gzWriter)
+
 	defer func() {
 		gz.Close()
-		c.Header("Content-Length", fmt.Sprint(c.Writer.Size()))
+		// 使用实际写入的字节数
+		c.Header("Content-Length", fmt.Sprint(atomic.LoadInt64(&counter.count)))
 	}()
+
 	c.Next()
 }
 

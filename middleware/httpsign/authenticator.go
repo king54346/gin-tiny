@@ -72,14 +72,14 @@ func NewAuthenticator(secretKeys Secrets, options ...Option) *Authenticator {
 
 // Authenticated returns a gin middleware which permits given permissions in parameter.
 func (a *Authenticator) Authenticated() gin.HandlerFunc {
-	return func(c *gin.context) {
-		sigHeader, err := NewSignatureHeader(c.Request)
+	return func(c gin.Context) {
+		sigHeader, err := NewSignatureHeader(c.Request())
 		if err != nil {
 			_ = c.AbortWithError(http.StatusUnauthorized, err)
 			return
 		}
 		for _, v := range a.validators {
-			if err := v.Validate(c.Request); err != nil {
+			if err := v.Validate(c.Request()); err != nil {
 				_ = c.AbortWithError(http.StatusBadRequest, err)
 				return
 			}
@@ -98,7 +98,7 @@ func (a *Authenticator) Authenticated() gin.HandlerFunc {
 			_ = c.AbortWithError(http.StatusBadRequest, err)
 			return
 		}
-		signString := constructSignMessage(c.Request, sigHeader.headers)
+		signString := constructSignMessage(c.Request(), sigHeader.headers)
 		signature, err := secret.Algorithm.Sign(signString, secret.Key)
 		if err != nil {
 			_ = c.AbortWithError(http.StatusInternalServerError, err)

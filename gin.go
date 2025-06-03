@@ -67,6 +67,10 @@ type RouteInfo struct {
 // RoutesInfo defines a RouteInfo slice.
 type RoutesInfo []RouteInfo
 
+type Validator interface {
+	Validate(i interface{}) error
+}
+
 // Trusted platforms
 const (
 	// PlatformGoogleAppEngine when running on Google App Engine. Trust X-Appengine-Remote-Addr
@@ -165,6 +169,8 @@ type Engine struct {
 	maxSections    uint16
 	trustedProxies []string
 	trustedCIDRs   []*net.IPNet
+
+	Validator Validator
 }
 
 var _ IRouter = (*Engine)(nil)

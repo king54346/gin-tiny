@@ -65,6 +65,23 @@ type responseWriter struct {
 
 var _ ResponseWriter = (*responseWriter)(nil)
 
+// 适配器：将 ResponseWriter 接口适配为 *responseWriter
+type responseWriterAdapter struct {
+	ResponseWriter
+	size   int
+	status int
+}
+
+func (rwa *responseWriterAdapter) reset(writer http.ResponseWriter) {
+	// 适配器不支持 reset，因为它包装的是接口
+}
+
+func (rwa *responseWriterAdapter) Unwrap() http.ResponseWriter {
+	if unwrapper, ok := rwa.ResponseWriter.(interface{ Unwrap() http.ResponseWriter }); ok {
+		return unwrapper.Unwrap()
+	}
+	return nil
+}
 func NewResponseWriter(writer http.ResponseWriter) *responseWriter {
 	w := &responseWriter{
 		ResponseWriter: writer,

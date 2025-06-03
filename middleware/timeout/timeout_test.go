@@ -11,7 +11,7 @@ import (
 	"github.com/stretchr/testify/assert"
 )
 
-func emptySuccessResponse(c *gin.Context) {
+func emptySuccessResponse(c gin.Context) {
 	time.Sleep(200 * time.Microsecond)
 	c.String(http.StatusOK, "")
 }
@@ -40,7 +40,7 @@ func TestWithoutTimeout(t *testing.T) {
 	assert.Equal(t, "", w.Body.String())
 }
 
-func testResponse(c *gin.Context) {
+func testResponse(c gin.Context) {
 	c.String(http.StatusRequestTimeout, "test response")
 }
 
@@ -60,7 +60,7 @@ func TestCustomResponse(t *testing.T) {
 	assert.Equal(t, "test response", w.Body.String())
 }
 
-func emptySuccessResponse2(c *gin.Context) {
+func emptySuccessResponse2(c gin.Context) {
 	time.Sleep(50 * time.Microsecond)
 	c.String(http.StatusOK, "")
 }
@@ -81,7 +81,7 @@ func TestSuccess(t *testing.T) {
 	assert.Equal(t, "", w.Body.String())
 }
 
-func panicResponse(c *gin.Context) {
+func panicResponse(c gin.Context) {
 	panic("test")
 }
 

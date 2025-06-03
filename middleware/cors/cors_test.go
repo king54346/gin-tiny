@@ -2,26 +2,25 @@ package cors
 
 import (
 	"context"
+	gin "gin-tiny"
+	"github.com/stretchr/testify/assert"
 	"net/http"
 	"net/http/httptest"
 	"strings"
 	"testing"
 	"time"
-
-	"github.com/gin-gonic/gin"
-	"github.com/stretchr/testify/assert"
 )
 
 func newTestRouter(config Config) *gin.Engine {
 	router := gin.New()
 	router.Use(New(config))
-	router.GET("/", func(c *gin.Context) {
+	router.GET("/", func(c gin.Context) {
 		c.String(http.StatusOK, "get")
 	})
-	router.POST("/", func(c *gin.Context) {
+	router.POST("/", func(c gin.Context) {
 		c.String(http.StatusOK, "post")
 	})
-	router.PATCH("/", func(c *gin.Context) {
+	router.PATCH("/", func(c gin.Context) {
 		c.String(http.StatusOK, "patch")
 	})
 	return router

@@ -85,7 +85,7 @@ type methodTrees struct {
 	staticRouter map[string]supportMethodsHandlers // 存储静态路由或多个http方法的处理程序
 }
 
-// todo 优化
+// HTTP方法位掩码常量
 const (
 	MethodConnect = 1 << iota
 	MethodDelete
@@ -98,18 +98,40 @@ const (
 	MethodTrace
 )
 
-// 方法名到位掩码的映射
-var methodToBitmask = map[string]uint16{
-	http.MethodConnect: MethodConnect,
-	http.MethodDelete:  MethodDelete,
-	http.MethodGet:     MethodGet,
-	http.MethodHead:    MethodHead,
-	http.MethodOptions: MethodOptions,
-	http.MethodPatch:   MethodPatch,
-	http.MethodPost:    MethodPost,
-	http.MethodPut:     MethodPut,
-	http.MethodTrace:   MethodTrace,
+// 方法映射（单一数据源，使用数组保证顺序）
+var methodMappings = [...]struct {
+	name    string
+	bitmask uint16
+}{
+	{http.MethodConnect, MethodConnect},
+	{http.MethodDelete, MethodDelete},
+	{http.MethodGet, MethodGet},
+	{http.MethodHead, MethodHead},
+	{http.MethodOptions, MethodOptions},
+	{http.MethodPatch, MethodPatch},
+	{http.MethodPost, MethodPost},
+	{http.MethodPut, MethodPut},
+	{http.MethodTrace, MethodTrace},
 }
+
+// 自动生成的映射和切片
+var (
+	methodToBitmask = func() map[string]uint16 {
+		m := make(map[string]uint16, len(methodMappings))
+		for _, mapping := range methodMappings {
+			m[mapping.name] = mapping.bitmask
+		}
+		return m
+	}()
+
+	anyMethods = func() []string {
+		methods := make([]string, len(methodMappings))
+		for i, mapping := range methodMappings {
+			methods[i] = mapping.name
+		}
+		return methods
+	}()
+)
 
 // IsMethodSupported 检查给定的HTTP方法是否被支持
 func (smh *supportMethodsHandlers) IsMethodSupported(method string) bool {
@@ -645,34 +667,29 @@ type skippedNode struct {
 	paramsCount int16
 }
 
-// Returns the handle registered with the given path (key). The values of
-// wildcards are saved to a map.
-// If no handle can be found, a TSR (trailing slash redirect) recommendation is
-// made if a handle exists with an extra (without the) trailing slash for the
-// given path.
-// 从路由树中获取path对应的handlers
-// *skippedNodes []skippedNode: 在gin的路由匹配过程中，有时可能需要跳过某些节点来找到最佳匹配。这个切片用于存储在匹配过程中被跳过的节点信息
-// 需要解码（unescape）URL中的路径参数
+// getValue 从路由树中获取对应的处理程序
+// 优化版本：减少内存分配，提高性能
 func (n *node) getValue(path string, params *Params, skippedNodes *[]skippedNode, unescape bool) (value nodeValue) {
 	var globalParamsCount int16
 
-walk: // Outer loop for walking the tree
+walk:
 	for {
 		prefix := n.path
-		// 待匹配的path大于node.path
+
+		// 情况1：待匹配路径长于当前节点路径
 		if len(path) > len(prefix) {
-			// 前缀能匹配   /search/v1 能匹配/search
+			// 检查前缀是否匹配
 			if path[:len(prefix)] == prefix {
-				//取匹配后半部分的path
+				// 获取剩余路径
 				path = path[len(prefix):]
 
-				// 路径匹配到末尾
+				// 获取下一个字符用于匹配
 				idxc := path[0]
-				// 遍历当前的node.indices,找到首字母相同的node
-				// 例如：/search/v1. /searchone  indices = "/o"  idxc = 'o'
-				for i, c := range []byte(n.indices) {
-					if c == idxc {
-						//  strings.HasPrefix(n.children[len(n.children)-1].path, ":") == n.wildChild
+
+				// 遍历子节点索引
+				for i := 0; i < len(n.indices); i++ {
+					if n.indices[i] == idxc {
+						// 如果有通配符子节点，保存当前状态
 						if n.wildChild {
 							index := len(*skippedNodes)
 							*skippedNodes = (*skippedNodes)[:index+1]
@@ -690,59 +707,54 @@ walk: // Outer loop for walking the tree
 								paramsCount: globalParamsCount,
 							}
 						}
-						// 进行下一轮匹配
+						// 继续遍历匹配的子节点
 						n = n.children[i]
 						continue walk
 					}
 				}
 
+				// 没有通配符子节点
 				if !n.wildChild {
-					// If the path at the end of the loop is not equal to '/' and the current node has no child nodes
-					// the current node needs to roll back to last valid skippedNode
+					// 尝试回退到之前跳过的节点
 					if path != "/" {
 						for length := len(*skippedNodes); length > 0; length-- {
-							skippedNode := (*skippedNodes)[length-1]
+							skipped := (*skippedNodes)[length-1]
 							*skippedNodes = (*skippedNodes)[:length-1]
-							if strings.HasSuffix(skippedNode.path, path) {
-								path = skippedNode.path
-								n = skippedNode.node
+							if strings.HasSuffix(skipped.path, path) {
+								path = skipped.path
+								n = skipped.node
 								if value.params != nil {
-									*value.params = (*value.params)[:skippedNode.paramsCount]
+									*value.params = (*value.params)[:skipped.paramsCount]
 								}
-								globalParamsCount = skippedNode.paramsCount
+								globalParamsCount = skipped.paramsCount
 								continue walk
 							}
 						}
 					}
 
-					// Nothing found.
-					// We can recommend to redirect to the same URL without a
-					// trailing slash if a leaf exists for that path.
+					// 检查尾部斜杠重定向
 					value.tsr = path == "/" && n.handlers != nil
 					return
 				}
 
-				// Handle wildcard child, which is always at the end of the array
+				// 处理通配符子节点（总是在最后）
 				n = n.children[len(n.children)-1]
 				globalParamsCount++
 
+				// 根据节点类型处理
 				switch n.nType {
 				case param:
-					// fix truncate the parameter
-					// tree_test.go  line: 204
-
-					// Find param end (either '/' or path end)
+					// 查找参数结束位置（'/' 或路径末尾）
 					end := 0
 					for end < len(path) && path[end] != '/' {
 						end++
 					}
 
-					// Save param value
+					// 保存参数值
 					if params != nil && cap(*params) > 0 {
 						if value.params == nil {
 							value.params = params
 						}
-						// Expand slice within preallocated capacity
 						i := len(*value.params)
 						*value.params = (*value.params)[:i+1]
 						val := path[:end]
@@ -757,7 +769,7 @@ walk: // Outer loop for walking the tree
 						}
 					}
 
-					// we need to go deeper!
+					// 检查是否还有剩余路径
 					if end < len(path) {
 						if len(n.children) > 0 {
 							path = path[end:]
@@ -765,30 +777,31 @@ walk: // Outer loop for walking the tree
 							continue walk
 						}
 
-						// ... but we can't
+						// 不能继续，检查尾部斜杠
 						value.tsr = len(path) == end+1
 						return
 					}
 
+					// 检查当前节点是否有处理程序
 					if value.handlers = n.handlers; value.handlers != nil {
 						value.fullPath = n.fullPath
 						return
 					}
+
+					// 检查是否有尾部斜杠的处理程序
 					if len(n.children) == 1 {
-						// No handle found. Check if a handle for this path + a
-						// trailing slash exists for TSR recommendation
 						n = n.children[0]
-						value.tsr = (n.path == "/" && n.handlers != nil) || (n.path == "" && n.indices == "/")
+						value.tsr = (n.path == "/" && n.handlers != nil) ||
+							(n.path == "" && n.indices == "/")
 					}
 					return
 
 				case catchAll:
-					// Save param value
+					// 保存catch-all参数
 					if params != nil {
 						if value.params == nil {
 							value.params = params
 						}
-						// Expand slice within preallocated capacity
 						i := len(*value.params)
 						*value.params = (*value.params)[:i+1]
 						val := path
@@ -812,36 +825,33 @@ walk: // Outer loop for walking the tree
 				}
 			}
 		}
-		//
+
+		// 情况2：路径完全匹配当前节点
 		if path == prefix {
-			// If the current path does not equal '/' and the node does not have a registered handle and the most recently matched node has a child node
-			// the current node needs to roll back to last valid skippedNode
+			// 如果没有处理程序且不是根路径，尝试回退
 			if n.handlers == nil && path != "/" {
 				for length := len(*skippedNodes); length > 0; length-- {
-					skippedNode := (*skippedNodes)[length-1]
+					skipped := (*skippedNodes)[length-1]
 					*skippedNodes = (*skippedNodes)[:length-1]
-					if strings.HasSuffix(skippedNode.path, path) {
-						path = skippedNode.path
-						n = skippedNode.node
+					if strings.HasSuffix(skipped.path, path) {
+						path = skipped.path
+						n = skipped.node
 						if value.params != nil {
-							*value.params = (*value.params)[:skippedNode.paramsCount]
+							*value.params = (*value.params)[:skipped.paramsCount]
 						}
-						globalParamsCount = skippedNode.paramsCount
+						globalParamsCount = skipped.paramsCount
 						continue walk
 					}
 				}
-				//	n = latestNode.children[len(latestNode.children)-1]
 			}
-			// We should have reached the node containing the handle.
-			// Check if this node has a handle registered.
+
+			// 检查是否有处理程序
 			if value.handlers = n.handlers; value.handlers != nil {
 				value.fullPath = n.fullPath
 				return
 			}
 
-			// If there is no handle for this route, but this route has a
-			// wildcard child, there must be a handle for this path with an
-			// additional trailing slash
+			// 检查各种尾部斜杠重定向情况
 			if path == "/" && n.wildChild && n.nType != root {
 				value.tsr = true
 				return
@@ -852,10 +862,9 @@ walk: // Outer loop for walking the tree
 				return
 			}
 
-			// No handle found. Check if a handle for this path + a
-			// trailing slash exists for trailing slash recommendation
-			for i, c := range []byte(n.indices) {
-				if c == '/' {
+			// 检查子节点中的斜杠
+			for i := 0; i < len(n.indices); i++ {
+				if n.indices[i] == '/' {
 					n = n.children[i]
 					value.tsr = (len(n.path) == 1 && n.handlers != nil) ||
 						(n.nType == catchAll && n.children[0].handlers != nil)
@@ -866,25 +875,26 @@ walk: // Outer loop for walking the tree
 			return
 		}
 
-		// Nothing found. We can recommend to redirect to the same URL with an
-		// extra trailing slash if a leaf exists for that path
-		// 先判断是否可以建议尾部斜杠重定向
+		// 情况3：没有找到匹配
+		// 检查是否可以进行尾部斜杠重定向
 		value.tsr = path == "/" ||
-			(len(prefix) == len(path)+1 && prefix[len(path)] == '/' &&
-				path == prefix[:len(prefix)-1] && n.handlers != nil)
+			(len(prefix) == len(path)+1 &&
+				prefix[len(path)] == '/' &&
+				path == prefix[:len(prefix)-1] &&
+				n.handlers != nil)
 
-		// 如果不能，则尝试回退到之前跳过的节点，继续匹配，直到所有可能性都尝试完。
+		// 最后尝试回退
 		if !value.tsr && path != "/" {
 			for length := len(*skippedNodes); length > 0; length-- {
-				skippedNode := (*skippedNodes)[length-1]
+				skipped := (*skippedNodes)[length-1]
 				*skippedNodes = (*skippedNodes)[:length-1]
-				if strings.HasSuffix(skippedNode.path, path) {
-					path = skippedNode.path
-					n = skippedNode.node
+				if strings.HasSuffix(skipped.path, path) {
+					path = skipped.path
+					n = skipped.node
 					if value.params != nil {
-						*value.params = (*value.params)[:skippedNode.paramsCount]
+						*value.params = (*value.params)[:skipped.paramsCount]
 					}
-					globalParamsCount = skippedNode.paramsCount
+					globalParamsCount = skipped.paramsCount
 					continue walk
 				}
 			}
@@ -895,11 +905,11 @@ walk: // Outer loop for walking the tree
 }
 
 // findCaseInsensitivePath 大小写不敏感路径查找
+// findCaseInsensitivePath 大小写不敏感的路径查找（优化版本）
 func (n *node) findCaseInsensitivePath(path string, fixTrailingSlash bool) ([]byte, bool) {
 	const stackBufSize = 128
 
-	// Use a static sized buffer on the stack in the common case.
-	// If the path is too long, allocate a buffer on the heap instead.
+	// 预分配缓冲区
 	buf := make([]byte, 0, stackBufSize)
 	if length := len(path) + 1; length > stackBufSize {
 		buf = make([]byte, 0, length)
@@ -907,8 +917,8 @@ func (n *node) findCaseInsensitivePath(path string, fixTrailingSlash bool) ([]by
 
 	ciPath := n.findCaseInsensitivePathRec(
 		path,
-		buf,       // Preallocate enough memory for new path
-		[4]byte{}, // Empty rune buffer
+		buf,
+		[4]byte{},
 		fixTrailingSlash,
 	)
 
@@ -931,30 +941,25 @@ func shiftNRuneBytes(rb [4]byte, n int) [4]byte {
 	}
 }
 
-// Recursive case-insensitive lookup function used by n.findCaseInsensitivePath
-// findCaseInsensitivePath使用的不区分大小写的递归查找函数
+// findCaseInsensitivePathRec 递归查找大小写不敏感路径
 func (n *node) findCaseInsensitivePathRec(path string, ciPath []byte, rb [4]byte, fixTrailingSlash bool) []byte {
 	npLen := len(n.path)
 
-walk: // Outer loop for walking the tree
+walk:
 	for len(path) >= npLen && (npLen == 0 || strings.EqualFold(path[1:npLen], n.path[1:])) {
-		// Add common prefix to result
 		oldPath := path
 		path = path[npLen:]
 		ciPath = append(ciPath, n.path...)
 
 		if len(path) == 0 {
-			// We should have reached the node containing the handle.
-			// Check if this node has a handle registered.
 			if n.handlers != nil {
 				return ciPath
 			}
 
-			// No handle found.
-			// Try to fix the path by adding a trailing slash
+			// 尝试修复尾部斜杠
 			if fixTrailingSlash {
-				for i, c := range []byte(n.indices) {
-					if c == '/' {
+				for i := 0; i < len(n.indices); i++ {
+					if n.indices[i] == '/' {
 						n = n.children[i]
 						if (len(n.path) == 1 && n.handlers != nil) ||
 							(n.nType == catchAll && n.children[0].handlers != nil) {
@@ -967,54 +972,42 @@ walk: // Outer loop for walking the tree
 			return nil
 		}
 
-		// If this node does not have a wildcard (param or catchAll) child,
-		// we can just look up the next child node and continue to walk down
-		// the tree
 		if !n.wildChild {
-			// Skip rune bytes already processed
+			// 处理已处理的rune字节
 			rb = shiftNRuneBytes(rb, npLen)
 
 			if rb[0] != 0 {
-				// Old rune not finished
+				// 继续处理未完成的rune
 				idxc := rb[0]
-				for i, c := range []byte(n.indices) {
-					if c == idxc {
-						// continue with child node
+				for i := 0; i < len(n.indices); i++ {
+					if n.indices[i] == idxc {
 						n = n.children[i]
 						npLen = len(n.path)
 						continue walk
 					}
 				}
 			} else {
-				// Process a new rune
+				// 处理新的rune
 				var rv rune
-
-				// Find rune start.
-				// Runes are up to 4 byte long,
-				// -4 would definitely be another rune.
 				var off int
+
+				// 查找rune起始位置
 				for max := min(npLen, 3); off < max; off++ {
 					if i := npLen - off; utf8.RuneStart(oldPath[i]) {
-						// read rune from cached path
 						rv, _ = utf8.DecodeRuneInString(oldPath[i:])
 						break
 					}
 				}
 
-				// Calculate lowercase bytes of current rune
+				// 计算小写字节
 				lo := unicode.ToLower(rv)
 				utf8.EncodeRune(rb[:], lo)
-
-				// Skip already processed bytes
 				rb = shiftNRuneBytes(rb, off)
 
 				idxc := rb[0]
-				for i, c := range []byte(n.indices) {
-					// Lowercase matches
-					if c == idxc {
-						// must use a recursive approach since both the
-						// uppercase byte and the lowercase byte might exist
-						// as an index
+				for i := 0; i < len(n.indices); i++ {
+					if n.indices[i] == idxc {
+						// 递归方法处理大小写
 						if out := n.children[i].findCaseInsensitivePathRec(
 							path, ciPath, rb, fixTrailingSlash,
 						); out != nil {
@@ -1024,17 +1017,14 @@ walk: // Outer loop for walking the tree
 					}
 				}
 
-				// If we found no match, the same for the uppercase rune,
-				// if it differs
+				// 尝试大写
 				if up := unicode.ToUpper(rv); up != lo {
 					utf8.EncodeRune(rb[:], up)
 					rb = shiftNRuneBytes(rb, off)
 
 					idxc := rb[0]
-					for i, c := range []byte(n.indices) {
-						// Uppercase matches
-						if c == idxc {
-							// Continue with child node
+					for i := 0; i < len(n.indices); i++ {
+						if n.indices[i] == idxc {
 							n = n.children[i]
 							npLen = len(n.path)
 							continue walk
@@ -1043,8 +1033,7 @@ walk: // Outer loop for walking the tree
 				}
 			}
 
-			// Nothing found. We can recommend to redirect to the same URL
-			// without a trailing slash if a leaf exists for that path
+			// 未找到匹配
 			if fixTrailingSlash && path == "/" && n.handlers != nil {
 				return ciPath
 			}
@@ -1054,26 +1043,22 @@ walk: // Outer loop for walking the tree
 		n = n.children[0]
 		switch n.nType {
 		case param:
-			// Find param end (either '/' or path end)
+			// 查找参数结束位置
 			end := 0
 			for end < len(path) && path[end] != '/' {
 				end++
 			}
 
-			// Add param value to case insensitive path
 			ciPath = append(ciPath, path[:end]...)
 
-			// We need to go deeper!
 			if end < len(path) {
 				if len(n.children) > 0 {
-					// Continue with child node
 					n = n.children[0]
 					npLen = len(n.path)
 					path = path[end:]
 					continue
 				}
 
-				// ... but we can't
 				if fixTrailingSlash && len(path) == end+1 {
 					return ciPath
 				}
@@ -1085,14 +1070,11 @@ walk: // Outer loop for walking the tree
 			}
 
 			if fixTrailingSlash && len(n.children) == 1 {
-				// No handle found. Check if a handle for this path + a
-				// trailing slash exists
 				n = n.children[0]
 				if n.path == "/" && n.handlers != nil {
 					return append(ciPath, '/')
 				}
 			}
-
 			return nil
 
 		case catchAll:
@@ -1103,8 +1085,7 @@ walk: // Outer loop for walking the tree
 		}
 	}
 
-	// Nothing found.
-	// Try to fix the path by adding / removing a trailing slash
+	// 尝试修复尾部斜杠
 	if fixTrailingSlash {
 		if path == "/" {
 			return ciPath

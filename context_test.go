@@ -2335,7 +2335,7 @@ type interceptedWriter struct {
 }
 
 func (i interceptedWriter) WriteHeader(code int) {
-	i.Header().Del("X-Test")
+	i.ResponseWriter.Header().Del("X-Test")
 	i.ResponseWriter.WriteHeader(code)
 }
 

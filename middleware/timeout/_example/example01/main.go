@@ -9,7 +9,7 @@ import (
 	gin "gin-tiny"
 )
 
-func emptySuccessResponse(c *gin.Context) {
+func emptySuccessResponse(c *gin.context) {
 	time.Sleep(200 * time.Microsecond)
 	c.String(http.StatusOK, "")
 }

@@ -21,7 +21,7 @@ type Options struct {
 	ExcludedExtensions   ExcludedExtensions
 	ExcludedPaths        ExcludedPaths
 	ExcludedPathesRegexs ExcludedPathesRegexs
-	DecompressFn         func(c *gin.context)
+	DecompressFn         func(c gin.Context)
 }
 
 type Option func(*Options)
@@ -44,7 +44,7 @@ func WithExcludedPathsRegexs(args []string) Option {
 	}
 }
 
-func WithDecompressFn(decompressFn func(c *gin.context)) Option {
+func WithDecompressFn(decompressFn func(c gin.Context)) Option {
 	return func(o *Options) {
 		o.DecompressFn = decompressFn
 	}
@@ -100,16 +100,16 @@ func (e ExcludedPathesRegexs) Contains(requestURI string) bool {
 	return false
 }
 
-func DefaultDecompressHandle(c *gin.context) {
-	if c.Request.Body == nil {
+func DefaultDecompressHandle(c gin.Context) {
+	if c.Request().Body == nil {
 		return
 	}
-	r, err := gzip.NewReader(c.Request.Body)
+	r, err := gzip.NewReader(c.Request().Body)
 	if err != nil {
 		_ = c.AbortWithError(http.StatusBadRequest, err)
 		return
 	}
-	c.Request.Header.Del("Content-Encoding")
-	c.Request.Header.Del("Content-Length")
-	c.Request.Body = r
+	c.Request().Header.Del("Content-Encoding")
+	c.Request().Header.Del("Content-Length")
+	c.Request().Body = r
 }

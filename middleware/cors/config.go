@@ -58,13 +58,13 @@ func newCors(config Config) *cors {
 	}
 }
 
-func (cors *cors) applyCors(c *gin.context) {
-	origin := c.Request.Header.Get("Origin")
+func (cors *cors) applyCors(c gin.Context) {
+	origin := c.Request().Header.Get("Origin")
 	if len(origin) == 0 {
 		// request is not a CORS request
 		return
 	}
-	host := c.Request.Host
+	host := c.Request().Host
 
 	if origin == "http://"+host || origin == "https://"+host {
 		// request is not a CORS request but have origin header.
@@ -77,7 +77,7 @@ func (cors *cors) applyCors(c *gin.context) {
 		return
 	}
 
-	if c.Request.Method == "OPTIONS" {
+	if c.Request().Method == "OPTIONS" {
 		cors.handlePreflight(c)
 		defer c.AbortWithStatus(http.StatusNoContent) // Using 204 is better than 200 when the request status is OPTIONS
 	} else {
@@ -123,15 +123,15 @@ func (cors *cors) validateOrigin(origin string) bool {
 	return false
 }
 
-func (cors *cors) handlePreflight(c *gin.context) {
-	header := c.Writer.Header()
+func (cors *cors) handlePreflight(c gin.Context) {
+	header := c.Response().Header()
 	for key, value := range cors.preflightHeaders {
 		header[key] = value
 	}
 }
 
-func (cors *cors) handleNormal(c *gin.context) {
-	header := c.Writer.Header()
+func (cors *cors) handleNormal(c gin.Context) {
+	header := c.Response().Header()
 	for key, value := range cors.normalHeaders {
 		header[key] = value
 	}

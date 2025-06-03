@@ -14,13 +14,6 @@ import (
 var (
 	// regEnLetter matches english letters for http method name
 	regEnLetter = regexp.MustCompile("^[A-Z]+$")
-
-	// anyMethods for RouterGroup Any method
-	anyMethods = []string{
-		http.MethodGet, http.MethodPost, http.MethodPut, http.MethodPatch,
-		http.MethodHead, http.MethodOptions, http.MethodDelete, http.MethodConnect,
-		http.MethodTrace,
-	}
 )
 
 // IRouter 定义所有路由handle接口包括单个和组路由
