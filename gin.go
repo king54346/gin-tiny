@@ -7,6 +7,7 @@ package ginTiny
 import (
 	"fmt"
 	"gin-tiny/internal/bytesconv"
+	"github.com/patrickmn/go-cache"
 	"net"
 	"net/http"
 	"os"
@@ -14,6 +15,7 @@ import (
 	"regexp"
 	"strings"
 	"sync"
+	"time"
 
 	"golang.org/x/net/http2"
 	"golang.org/x/net/http2/h2c"
@@ -169,8 +171,8 @@ type Engine struct {
 	maxSections    uint16
 	trustedProxies []string
 	trustedCIDRs   []*net.IPNet
-
-	Validator Validator
+	routeCache     *cache.Cache // 用于缓存路由查找结果
+	Validator      Validator
 }
 
 var _ IRouter = (*Engine)(nil)
@@ -207,6 +209,7 @@ func New() *Engine {
 		trustedProxies:         []string{"0.0.0.0/0", "::/0"},
 		trustedCIDRs:           defaultTrustedCIDRs,
 	}
+	engine.routeCache = cache.New(5*time.Minute, 10*time.Minute)
 	engine.RouterGroup.engine = engine
 	engine.pool.New = func() any {
 		return engine.allocateContext(engine.maxParams)
@@ -593,8 +596,33 @@ func (engine *Engine) handleHTTPRequest(c *context) {
 		methodTree := t.getMethodTree(httpMethod)
 		if methodTree != nil {
 			root := methodTree
+
+			// 构建缓存键
+			cacheKey := httpMethod + "-" + rPath
+
+			// 尝试从缓存获取
+			if cached, ok := engine.routeCache.Get(cacheKey); ok {
+				cachedValue := cached.(nodeValue)
+				if cachedValue.handlers != nil {
+					c.handlers = cachedValue.handlers
+					c.fullPath = cachedValue.fullPath
+					// 如果有参数，需要重新解析
+					if cachedValue.params != nil && len(*cachedValue.params) > 0 {
+						// 需要重新解析参数，因为参数值可能不同
+						value := root.getValue(rPath, c.params, c.skippedNodes, unescape)
+						c.params = value.params
+					}
+					c.Next()
+					c.writermem.WriteHeaderNow()
+					return
+				}
+			}
 			// 从路由树中查找handlers
 			value := root.getValue(rPath, c.params, c.skippedNodes, unescape)
+			// 将结果存入缓存
+			if value.handlers != nil {
+				engine.routeCache.Set(cacheKey, value, cache.DefaultExpiration)
+			}
 			if value.params != nil {
 				c.params = value.params
 			}

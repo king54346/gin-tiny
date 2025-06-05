@@ -796,7 +796,8 @@ func (c *context) AbortWithError(code int, err error) *Error {
 /******** ERROR MANAGEMENT **********/
 /************************************/
 
-// Error 添加错误到错误列表
+// Error 添加错误到错误列表，在最后统一处理所有收集到的错误(不过这与统一error处理方式不同)
+// 例如 if len(c.Errors) > 0 { c.JSON(http.StatusInternalServerError, gin.H{"errors": c.Errors}) }
 func (c *context) Error(err error) *Error {
 	if err == nil {
 		panic(ErrNilParam)
