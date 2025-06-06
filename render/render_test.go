@@ -21,9 +21,6 @@ import (
 	"google.golang.org/protobuf/proto"
 )
 
-// TODO unit tests
-// test errors
-
 func TestRenderJSON(t *testing.T) {
 	w := httptest.NewRecorder()
 	data := map[string]any{
