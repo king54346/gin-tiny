@@ -15,17 +15,17 @@ import (
 type ErrorType uint64
 
 const (
-	// ErrorTypeBind is used when context.Bind() fails.
+	// ErrorTypeBind 在 context.Bind() 失败时被使用。
 	ErrorTypeBind ErrorType = 1 << 63
-	// ErrorTypeRender is used when context.Render() fails.
+	// ErrorTypeRender 被用在 context.Render() 失败时。
 	ErrorTypeRender ErrorType = 1 << 62
-	// ErrorTypePrivate indicates a private error.
+	// ErrorTypePrivate 表示一个私有错误类型
 	ErrorTypePrivate ErrorType = 1 << 0
-	// ErrorTypePublic indicates a public error.
+	// ErrorTypePublic 表示一个公共错误类型
 	ErrorTypePublic ErrorType = 1 << 1
-	// ErrorTypeAny indicates any other error.
+	// ErrorTypeAny 表示任何错误类型
 	ErrorTypeAny ErrorType = 1<<64 - 1
-	// ErrorTypeNu indicates any other error.
+	// ErrorTypeNu 表示一个未定义的错误类型
 	ErrorTypeNu = 2
 )
 

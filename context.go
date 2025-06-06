@@ -102,7 +102,7 @@ type Context interface {
 	File(filepath string)
 	Attachment(file string, name string) error
 	Inline(file string, name string) error
-	NoContent(code int) error
+	NoContent(code int)
 	Redirect(code int, location string)
 	Data(code int, contentType string, data []byte)
 	DataFromReader(code int, contentLength int64, contentType string, reader io.Reader, extraHeaders map[string]string)
@@ -136,6 +136,12 @@ type Context interface {
 	ShouldBindUri(obj any) error
 	BindUri(obj any) error
 	Params() Params
+	ShouldBindJSON(obj any) error
+	ShouldBindXML(obj any) error
+	ShouldBindYAML(obj any) error
+	ShouldBindQuery(obj any) error
+	ShouldBindTOML(obj any) error
+	ShouldBindWith(obj any, b binding.Binding) error
 }
 
 type context struct {
@@ -1089,9 +1095,8 @@ func (c *context) Blob(code int, contentType string, b []byte) error {
 }
 
 // NoContent 返回无内容响应
-func (c *context) NoContent(code int) error {
+func (c *context) NoContent(code int) {
 	c.Status(code)
-	return nil
 }
 
 // Attachment 发送响应作为附件

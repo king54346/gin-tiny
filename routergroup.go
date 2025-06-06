@@ -105,6 +105,30 @@ func (group *RouterGroup) GET(relativePath string, handlers ...HandlerFunc) IRou
 	return group.handle(http.MethodGet, relativePath, handlers)
 }
 
+// GET 是一个快捷方式，用于注册 GET 请求的处理函数。
+// 这样的话只有handlerchain 中 只有1个handler，abort有没有没区别
+func (group *RouterGroup) GETWithError(relativePath string, handler ...HandlerFuncReturnError) IRoutes {
+	return group.handle(http.MethodGet, relativePath, group.wrap(handler))
+}
+
+func (group *RouterGroup) POSTWithError(relativePath string, handler ...HandlerFuncReturnError) IRoutes {
+
+	return group.handle(http.MethodPost, relativePath, group.wrap(handler))
+
+}
+func (group *RouterGroup) wrap(handler []HandlerFuncReturnError) HandlersChain {
+	return HandlersChain{func(c Context) {
+		// 调用业务函数
+		for _, h := range handler {
+			if err := h(c); err != nil {
+				// 处理错误
+				group.engine.HTTPErrorHandler(err, c)
+				return // 处理完错误后返回，避免继续执行后续的处理函数
+			}
+		}
+	}}
+}
+
 // DELETE is a shortcut for router.Handle("DELETE", path, handlers).
 func (group *RouterGroup) DELETE(relativePath string, handlers ...HandlerFunc) IRoutes {
 	return group.handle(http.MethodDelete, relativePath, handlers)

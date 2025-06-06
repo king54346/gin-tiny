@@ -50,6 +50,9 @@ type HandlerFunc func(Context)
 // HandlersChain defines a HandlerFunc slice.
 type HandlersChain []HandlerFunc
 
+// HandlerFuncReturnError 包装一个 HandlerFunc，使其可以统一的处理错误返回。
+type HandlerFuncReturnError func(Context) error
+
 // Last returns the last handler in the chain. i.e. the last handler is the main one.
 func (c HandlersChain) Last() HandlerFunc {
 	if length := len(c); length > 0 {
@@ -72,6 +75,8 @@ type RoutesInfo []RouteInfo
 type Validator interface {
 	Validate(i interface{}) error
 }
+
+type HTTPErrorHandler func(err error, c Context)
 
 // Trusted platforms
 const (
@@ -161,18 +166,19 @@ type Engine struct {
 
 	secureJSONPrefix string
 
-	allNoRoute     HandlersChain
-	allNoMethod    HandlersChain
-	noRoute        HandlersChain
-	noMethod       HandlersChain
-	pool           sync.Pool
-	trees          *methodTrees
-	maxParams      uint16
-	maxSections    uint16
-	trustedProxies []string
-	trustedCIDRs   []*net.IPNet
-	routeCache     *cache.Cache // 用于缓存路由查找结果
-	Validator      Validator
+	allNoRoute       HandlersChain
+	allNoMethod      HandlersChain
+	noRoute          HandlersChain
+	noMethod         HandlersChain
+	pool             sync.Pool
+	trees            *methodTrees
+	maxParams        uint16
+	maxSections      uint16
+	trustedProxies   []string
+	trustedCIDRs     []*net.IPNet
+	routeCache       *cache.Cache // 用于缓存路由查找结果
+	Validator        Validator
+	HTTPErrorHandler HTTPErrorHandler
 }
 
 var _ IRouter = (*Engine)(nil)
@@ -211,6 +217,7 @@ func New() *Engine {
 	}
 	engine.routeCache = cache.New(5*time.Minute, 10*time.Minute)
 	engine.RouterGroup.engine = engine
+	engine.HTTPErrorHandler = engine.DefaultHTTPErrorHandler
 	engine.pool.New = func() any {
 		return engine.allocateContext(engine.maxParams)
 	}
@@ -722,4 +729,26 @@ func redirectRequest(c *context) {
 	debugPrint("redirecting request %d: %s --> %s", code, rPath, rURL)
 	http.Redirect(c.Response(), req, rURL, code)
 	c.writermem.WriteHeaderNow()
+}
+
+func (engine *Engine) DefaultHTTPErrorHandler(err error, c Context) {
+	var statusCode int
+	var response any
+
+	switch err.(type) {
+	case *Error:
+		statusCode = http.StatusBadRequest
+		response = map[string]any{
+			"error":   "Invalid request parameters",
+			"details": err.(*Error).JSON(),
+		}
+	default:
+		// 处理私有错误或其他错误（不暴露详细信息）
+		statusCode = http.StatusInternalServerError
+		response = map[string]any{
+			"error": "Internal server error",
+		}
+	}
+
+	c.AbortWithStatusJSON(statusCode, response)
 }

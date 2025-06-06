@@ -442,3 +442,15 @@ func assertRoutePresent(t *testing.T, gotRoutes RoutesInfo, wantRoute RouteInfo)
 
 func handlerTest1(c Context) {}
 func handlerTest2(c Context) {}
+
+func TestEngineHandleContextPanic(t *testing.T) {
+	r := New()
+	r.GET("/", func(c Context) {
+		panic("test panic")
+	})
+
+	assert.PanicsWithValue(t, "test panic", func() {
+		w := PerformRequest(r, "GET", "/")
+		assert.Equal(t, 500, w.Code)
+	})
+}
