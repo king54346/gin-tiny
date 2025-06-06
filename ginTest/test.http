@@ -6,3 +6,12 @@ GET http://localhost:8080/user/john
 POST http://localhost:8080/user
 ###
 GET http://localhost:8080/user?name=hello
+###
+POST http://localhost:8080/users
+Content-Type: application/json
+
+{
+  "username": "existing_user",
+  "age": 30,
+  "email": "31232@qq.com"
+}

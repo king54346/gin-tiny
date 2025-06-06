@@ -1,8 +1,11 @@
 package main
 
 import (
+	"errors"
+	"fmt"
 	gin "gin-tiny"
 	"net/http"
+	"time"
 )
 
 func main() {
@@ -49,8 +52,135 @@ func main() {
 			})
 		},
 	)
+
+	r.GETWithError("/hello", func(c gin.Context) error {
+		name := c.QueryParams().Get("name")
+		if name == "" {
+			return &gin.Error{
+				Err:  errors.New("name is required"),
+				Type: gin.ErrorTypePublic,
+			}
+		}
+
+		if name == "error" {
+			return &gin.Error{
+				Err:  errors.New("an internal error occurred"),
+				Type: gin.ErrorTypePrivate,
+			}
+		}
+
+		c.JSON(http.StatusOK, gin.H{
+			"success": true,
+			"message": fmt.Sprintf("Hello, %s!", name),
+		})
+
+		return nil
+	})
+	r.HTTPErrorHandler = func(err error, c gin.Context) {
+		if ginErr, ok := err.(gin.Error); ok {
+			switch ginErr.Type {
+			case gin.ErrorTypePublic:
+				c.JSON(http.StatusBadRequest, gin.H{
+					"error":   "public error",
+					"message": ginErr.Error(),
+				})
+			case gin.ErrorTypePrivate:
+				c.JSON(http.StatusInternalServerError, gin.H{
+					"error":   "private error",
+					"message": "An internal error occurred. Please try again later.",
+				})
+			case gin.ErrorTypeBind:
+				c.JSON(http.StatusBadRequest, gin.H{
+					"error":   "binding error",
+					"message": "Invalid input data. Please check your request.",
+				})
+			default:
+				c.JSON(http.StatusInternalServerError, gin.H{
+					"error":   "unknown error",
+					"message": "An unknown error occurred.",
+				})
+			}
+			return
+		}
+
+		c.JSON(http.StatusInternalServerError, gin.H{
+			"error":   "internal server error",
+			"message": "An unexpected error occurred.",
+		})
+		return
+	}
+
 	// StaticFile,StaticFileFS,Static,StaticFS
+	r.POSTWithError("/users", createUserHandler)
 
 	r.Run(":8080")
 
+}
+
+func createUserHandler(c gin.Context) error {
+	var req struct {
+		Username string `json:"username" binding:"required"`
+		Email    string `json:"email" binding:"required,email"`
+		Age      int    `json:"age" binding:"min=1,max=120"`
+	}
+
+	// 1. 参数绑定和验证
+	if err := c.ShouldBindJSON(&req); err != nil {
+		return gin.Error{
+			Err:  err,
+			Type: gin.ErrorTypeBind,
+		}
+	}
+
+	// 2. 业务规则验证
+	if exists, err := checkUserExists(req.Username); err != nil {
+		return gin.Error{
+			Err:  err,
+			Type: gin.ErrorTypePrivate,
+		}
+	} else if exists {
+		return gin.Error{
+			Err:  errors.New("用户名已存在"),
+			Type: gin.ErrorTypePublic,
+		}
+	}
+
+	// 3. 创建用户
+	user, err := createUser(req.Username, req.Email, req.Age)
+	if err != nil {
+		return gin.Error{
+			Err:  err,
+			Type: gin.ErrorTypePrivate,
+		}
+	}
+
+	// 4. 成功响应
+	c.JSON(http.StatusCreated, gin.H{
+		"success": true,
+		"message": "用户创建成功",
+		"data":    user,
+	})
+
+	return nil
+}
+
+func checkUserExists(username string) (bool, error) {
+	if username == "error_user" {
+		return false, errors.New("database query failed")
+	}
+	return username == "existing_user", nil
+}
+
+func createUser(username, email string, age int) (map[string]any, error) {
+	if username == "error_user" {
+		return nil, errors.New("failed to create user")
+	}
+
+	return map[string]any{
+		"id":         time.Now().Unix(),
+		"username":   username,
+		"email":      email,
+		"age":        age,
+		"created_at": time.Now(),
+	}, nil
 }
