@@ -1,4 +1,4 @@
-module gin-tiny
+module github.com/king54346/gin-tiny
 
 go 1.23.0
 
