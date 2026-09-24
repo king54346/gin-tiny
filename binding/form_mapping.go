@@ -1,9 +1,11 @@
 package binding
 
 import (
+	"encoding"
 	"errors"
 	"fmt"
 	"maps"
+	"mime/multipart"
 	"reflect"
 	"slices"
 	"strconv"
@@ -146,6 +148,8 @@ func mappingRec(value reflect.Value, field reflect.StructField, setter setter, t
 type setOptions struct {
 	isDefaultExists bool
 	defaultValue    string
+	// parser 指定优先使用的解析接口，目前只支持 "encoding.TextUnmarshaler"
+	parser string
 }
 
 func tryToSetValue(value reflect.Value, field reflect.StructField, setter setter, tag string) (bool, error) {
@@ -166,9 +170,13 @@ func tryToSetValue(value reflect.Value, field reflect.StructField, setter setter
 	for len(opts) > 0 {
 		opt, opts, _ = strings.Cut(opts, ",")
 
-		if k, v, _ := strings.Cut(opt, "="); k == "default" {
+		k, v, _ := strings.Cut(opt, "=")
+		switch k {
+		case "default":
 			setOpt.isDefaultExists = true
 			setOpt.defaultValue = v
+		case "parser":
+			setOpt.parser = v
 		}
 	}
 
@@ -181,36 +189,84 @@ func setByForm(value reflect.Value, field reflect.StructField, form map[string][
 		return false, nil
 	}
 
-	// 类型自身实现了 BindUnmarshaler 时作为整体解析（包括底层是切片的类型，如把 "a,b,c" 解析成集合），
-	// 不再按切片规则逐个元素绑定
-	var val string
-	if !ok {
-		val = opt.defaultValue
-	}
-	if len(vs) > 0 {
-		val = vs[0]
-	}
-	if set, err := trySetCustom(val, value); set {
-		return true, err
-	}
-
 	switch value.Kind() {
-	case reflect.Slice:
-		if !ok {
-			vs = []string{opt.defaultValue}
+	case reflect.Slice, reflect.Array:
+		// 键存在但没有值时与键不存在同样处理：有默认值用默认值，否则不绑定
+		if len(vs) == 0 {
+			if !opt.isDefaultExists {
+				return false, nil
+			}
+			vs = defaultValues(field, opt.defaultValue)
 		}
-		return true, setSlice(vs, value, field)
-	case reflect.Array:
-		if !ok {
-			vs = []string{opt.defaultValue}
+
+		// 类型自身实现了自定义解析接口时作为整体解析（如把 "a/b/c" 解析成自定义切片类型），
+		// 不再按切片规则逐个元素绑定
+		if set, err := trySetCustom(vs[0], value, opt.parser); set {
+			return true, err
+		}
+
+		if vs, err = trySplit(vs, field); err != nil {
+			return false, err
+		}
+
+		if value.Kind() == reflect.Slice {
+			return true, setSlice(vs, value, field, opt)
 		}
 		if len(vs) != value.Len() {
 			return false, fmt.Errorf("%q is not valid value for %s", vs, value.Type().String())
 		}
-		return true, setArray(vs, value, field)
+		return true, setArray(vs, value, field, opt)
 	default:
-		return true, setWithProperType(val, value, field)
+		// 键不存在、没有值或值为空字符串时都使用默认值
+		val := opt.defaultValue
+		if len(vs) > 0 && vs[0] != "" {
+			val = vs[0]
+		}
+		return true, setWithProperType(val, value, field, opt)
 	}
+}
+
+// defaultValues 把切片/数组字段的默认值拆成多个值。标签里逗号用来分隔选项，
+// 所以多个默认值用分号分隔，如 `form:",default=1;2;3"`
+func defaultValues(field reflect.StructField, def string) []string {
+	switch field.Tag.Get("collection_format") {
+	case "", "multi":
+		return strings.Split(def, ";")
+	case "csv":
+		// 转成逗号分隔后交给 trySplit 按 csv 规则拆分
+		return []string{strings.ReplaceAll(def, ";", ",")}
+	default:
+		return []string{def}
+	}
+}
+
+// trySplit 按 collection_format 标签把每个值拆成多个元素，multi（默认）表示每个值就是一个元素
+func trySplit(vs []string, field reflect.StructField) ([]string, error) {
+	var sep string
+	switch cf := field.Tag.Get("collection_format"); cf {
+	case "", "multi":
+		return vs, nil
+	case "csv":
+		sep = ","
+	case "ssv":
+		sep = " "
+	case "tsv":
+		sep = "\t"
+	case "pipes":
+		sep = "|"
+	default:
+		return nil, fmt.Errorf("%s is not supported in the collection_format. (multi, csv, ssv, tsv, pipes)", cf)
+	}
+
+	n := 0
+	for _, v := range vs {
+		n += strings.Count(v, sep) + 1
+	}
+	newVs := make([]string, 0, n)
+	for _, v := range vs {
+		newVs = append(newVs, strings.Split(v, sep)...)
+	}
+	return newVs, nil
 }
 
 // BindUnmarshaler 由需要自定义解析规则的类型实现，适用于表单、查询参数、路径参数和请求头绑定。
@@ -220,19 +276,27 @@ type BindUnmarshaler interface {
 	UnmarshalParam(param string) error
 }
 
-// trySetCustom 字段类型（的指针）实现了 BindUnmarshaler 时交给它解析，优先于内置的类型转换规则
-func trySetCustom(val string, value reflect.Value) (isSet bool, err error) {
+// trySetCustom 字段类型（的指针）实现了自定义解析接口时交给它解析，优先于内置的类型转换规则。
+// 标签指定 parser=encoding.TextUnmarshaler 且类型实现了该接口时优先用 UnmarshalText；
+// 否则使用 BindUnmarshaler。未指定 parser 时即使实现了 TextUnmarshaler 也不使用，保持向后兼容
+func trySetCustom(val string, value reflect.Value, parser string) (isSet bool, err error) {
 	if !value.CanAddr() {
 		return false, nil
 	}
-	if u, ok := value.Addr().Interface().(BindUnmarshaler); ok {
+	ptr := value.Addr().Interface()
+	if parser == "encoding.TextUnmarshaler" {
+		if u, ok := ptr.(encoding.TextUnmarshaler); ok {
+			return true, u.UnmarshalText(bytesconv.StringToBytes(val))
+		}
+	}
+	if u, ok := ptr.(BindUnmarshaler); ok {
 		return true, u.UnmarshalParam(val)
 	}
 	return false, nil
 }
 
-func setWithProperType(val string, value reflect.Value, field reflect.StructField) error {
-	if ok, err := trySetCustom(val, value); ok {
+func setWithProperType(val string, value reflect.Value, field reflect.StructField, opt setOptions) error {
+	if ok, err := trySetCustom(val, value, opt.parser); ok {
 		return err
 	}
 	switch value.Kind() {
@@ -272,10 +336,19 @@ func setWithProperType(val string, value reflect.Value, field reflect.StructFiel
 		switch value.Interface().(type) {
 		case time.Time:
 			return setTimeField(val, field, value)
+		case multipart.FileHeader:
+			// 文件只能来自 multipart 请求的文件部分，普通表单值不做解析
+			return nil
 		}
 		return json.Unmarshal(bytesconv.StringToBytes(val), value.Addr().Interface())
 	case reflect.Map:
 		return json.Unmarshal(bytesconv.StringToBytes(val), value.Addr().Interface())
+	case reflect.Pointer:
+		// 切片/数组元素为指针时（如 []*T）逐个分配后按元素类型解析
+		if value.IsNil() {
+			value.Set(reflect.New(value.Type().Elem()))
+		}
+		return setWithProperType(val, value.Elem(), field, opt)
 	default:
 		return errUnknownType
 	}
@@ -332,25 +405,35 @@ func setTimeField(val string, structField reflect.StructField, value reflect.Val
 		timeFormat = time.RFC3339
 	}
 
+	// 空值或全是空白时视为未传，设为零值
+	if val = strings.TrimSpace(val); val == "" {
+		value.Set(reflect.ValueOf(time.Time{}))
+		return nil
+	}
+
 	switch tf := strings.ToLower(timeFormat); tf {
-	case "unix", "unixnano":
+	case "unix", "unixmilli", "unixmicro", "unixnano":
 		tv, err := strconv.ParseInt(val, 10, 64)
 		if err != nil {
 			return err
 		}
 
-		d := time.Duration(1)
-		if tf == "unixnano" {
-			d = time.Second
+		var t time.Time
+		switch tf {
+		case "unix":
+			t = time.Unix(tv, 0)
+		case "unixmilli":
+			t = time.UnixMilli(tv)
+		case "unixmicro":
+			t = time.UnixMicro(tv)
+		default:
+			t = time.Unix(0, tv)
+		}
+		if isUTC, _ := strconv.ParseBool(structField.Tag.Get("time_utc")); isUTC {
+			t = t.UTC()
 		}
 
-		t := time.Unix(tv/int64(d), tv%int64(d))
 		value.Set(reflect.ValueOf(t))
-		return nil
-	}
-
-	if val == "" {
-		value.Set(reflect.ValueOf(time.Time{}))
 		return nil
 	}
 
@@ -376,9 +459,9 @@ func setTimeField(val string, structField reflect.StructField, value reflect.Val
 	return nil
 }
 
-func setArray(vals []string, value reflect.Value, field reflect.StructField) error {
+func setArray(vals []string, value reflect.Value, field reflect.StructField, opt setOptions) error {
 	for i, s := range vals {
-		err := setWithProperType(s, value.Index(i), field)
+		err := setWithProperType(s, value.Index(i), field, opt)
 		if err != nil {
 			return err
 		}
@@ -386,9 +469,9 @@ func setArray(vals []string, value reflect.Value, field reflect.StructField) err
 	return nil
 }
 
-func setSlice(vals []string, value reflect.Value, field reflect.StructField) error {
+func setSlice(vals []string, value reflect.Value, field reflect.StructField, opt setOptions) error {
 	slice := reflect.MakeSlice(value.Type(), len(vals), len(vals))
-	err := setArray(vals, slice, field)
+	err := setArray(vals, slice, field, opt)
 	if err != nil {
 		return err
 	}
@@ -397,6 +480,11 @@ func setSlice(vals []string, value reflect.Value, field reflect.StructField) err
 }
 
 func setTimeDuration(val string, value reflect.Value) error {
+	// 空值或全是空白时视为未传，设为零值
+	if val = strings.TrimSpace(val); val == "" {
+		value.SetInt(0)
+		return nil
+	}
 	d, err := time.ParseDuration(val)
 	if err != nil {
 		return err

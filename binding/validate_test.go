@@ -21,45 +21,36 @@ type substructNoValidation struct {
 type mapNoValidationSub map[string]substructNoValidation
 
 type structNoValidationValues struct {
+	Date               time.Time
+	UniversalInterface any
+	CustomInterface    testInterface
+	FloatMap           map[string]float32
+	StructMap          mapNoValidationSub
+	String             string
 	substructNoValidation
-
-	Boolean bool
-
-	Uinteger   uint
-	Integer    int
-	Integer8   int8
-	Integer16  int16
-	Integer32  int32
-	Integer64  int64
-	Uinteger8  uint8
-	Uinteger16 uint16
-	Uinteger32 uint32
-	Uinteger64 uint64
-
-	Float32 float32
-	Float64 float64
-
-	String string
-
-	Date time.Time
-
-	Struct        substructNoValidation
-	InlinedStruct struct {
-		String  []string
-		Integer int
-	}
-
+	Struct             substructNoValidation
 	IntSlice           []int
 	IntPointerSlice    []*int
 	StructPointerSlice []*substructNoValidation
 	StructSlice        []substructNoValidation
 	InterfaceSlice     []testInterface
-
-	UniversalInterface any
-	CustomInterface    testInterface
-
-	FloatMap  map[string]float32
-	StructMap mapNoValidationSub
+	InlinedStruct      struct {
+		String  []string
+		Integer int
+	}
+	Uinteger   uint
+	Integer    int
+	Integer64  int64
+	Uinteger64 uint64
+	Float64    float64
+	Integer32  int32
+	Uinteger32 uint32
+	Float32    float32
+	Integer16  int16
+	Uinteger16 uint16
+	Boolean    bool
+	Integer8   int8
+	Uinteger8  uint8
 }
 
 func createNoValidationValues() structNoValidationValues {
