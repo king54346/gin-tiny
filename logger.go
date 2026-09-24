@@ -1,7 +1,3 @@
-// Copyright 2014 Manu Martinez-Almeida. All rights reserved.
-// Use of this source code is governed by a MIT style
-// license that can be found in the LICENSE file.
-
 package ginTiny
 
 import (
@@ -49,10 +45,17 @@ type LoggerConfig struct {
 	// Optional. Default value is gin.DefaultWriter.
 	Output io.Writer
 
+	// Skip 返回 true 时不记录该请求，在处理链执行完之后调用，因此可以根据状态码等响应信息判断。
+	// 与 SkipPaths 同时生效。Optional.
+	Skip Skipper
+
 	// SkipPaths is an url path array which logs are not written.
 	// Optional.
 	SkipPaths []string
 }
+
+// Skipper 判断是否跳过某个请求的日志，见 LoggerConfig.Skip
+type Skipper func(c Context) bool
 
 // LogFormatter gives the signature of the formatter function passed to LoggerWithFormatter
 type LogFormatter func(params LogFormatterParams) string
@@ -80,7 +83,8 @@ type LogFormatterParams struct {
 	// BodySize is the size of the Response Body
 	BodySize int
 	// Keys are the keys set on the request's context.
-	//Keys map[string]any
+	// 取值时机在处理链执行完之后，是 Keys 的快照副本
+	Keys map[any]any
 }
 
 // StatusCodeColor is the ANSI color for appropriately logging http status code to a terminal.
@@ -246,11 +250,11 @@ func LoggerWithConfig(conf LoggerConfig) HandlerFunc {
 		c.Next()
 
 		// Log only when path is not being skipped
-		if _, ok := skip[path]; !ok {
+		if _, ok := skip[path]; !ok && (conf.Skip == nil || !conf.Skip(c)) {
 			param := LogFormatterParams{
 				Request: c.Request(),
 				isTerm:  isTerm,
-				//Keys:    c.keys,
+				Keys:    c.Keys(),
 			}
 
 			// Stop timer

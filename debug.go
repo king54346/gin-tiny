@@ -1,7 +1,3 @@
-// Copyright 2014 Manu Martinez-Almeida. All rights reserved.
-// Use of this source code is governed by a MIT style
-// license that can be found in the LICENSE file.
-
 package ginTiny
 
 import (
@@ -30,13 +26,22 @@ func debugPrintRoute(httpMethod, absolutePath string, handlers HandlersChain) {
 	}
 }
 
+// DebugPrintFunc 自定义 debug 日志的输出方式（例如接入 slog），为 nil 时写到 DefaultWriter。
+// 只在 debug 模式下调用；format 与 values 同 fmt.Printf，format 不一定以换行结尾
+var DebugPrintFunc func(format string, values ...any)
+
 func debugPrint(format string, values ...any) {
-	if IsDebugging() {
-		if !strings.HasSuffix(format, "\n") {
-			format += "\n"
-		}
-		fmt.Fprintf(DefaultWriter, "[GIN-debug] "+format, values...)
+	if !IsDebugging() {
+		return
 	}
+	if DebugPrintFunc != nil {
+		DebugPrintFunc(format, values...)
+		return
+	}
+	if !strings.HasSuffix(format, "\n") {
+		format += "\n"
+	}
+	fmt.Fprintf(DefaultWriter, "[GIN-debug] "+format, values...)
 }
 
 func debugPrintWARNINGDefault() {

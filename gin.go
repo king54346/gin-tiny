@@ -1,13 +1,10 @@
-// Copyright 2014 Manu Martinez-Almeida. All rights reserved.
-// Use of this source code is governed by a MIT style
-// license that can be found in the LICENSE file.
-
 package ginTiny
 
 import (
 	stdctx "context"
 	"errors"
 	"fmt"
+	"html/template"
 	"net"
 	"net/http"
 	"net/netip"
@@ -20,6 +17,7 @@ import (
 	"time"
 
 	"github.com/king54346/gin-tiny/internal/bytesconv"
+	"github.com/king54346/gin-tiny/render"
 	"golang.org/x/net/http2"
 	"golang.org/x/net/http2/h2c"
 )
@@ -44,6 +42,9 @@ var defaultTrustedCIDRs = []netip.Prefix{
 
 var regSafePrefix = regexp.MustCompile("[^a-zA-Z0-9/-]+")
 var regRemoveRepeatedChar = regexp.MustCompile("/{2,}")
+
+// OptionFunc 用于配置 Engine，见 New / Default / Engine.With
+type OptionFunc func(*Engine)
 
 // HandlerFunc 定义中间件使用的处理函数类型
 type HandlerFunc func(Context)
@@ -135,6 +136,11 @@ type Engine struct {
 	// UseRawPath if enabled, the url.RawPath will be used to find parameters.
 	UseRawPath bool
 
+	// UseEscapedPath 为 true 时使用 url.EscapedPath() 匹配路由，优先于 UseRawPath。
+	// 与 UseRawPath 的区别：RawPath 只在请求的编码方式与默认编码不同时才被设置，EscapedPath() 总是返回转义后的路径，
+	// 因此匹配行为稳定一致（如 /a%2Fb 不会被当作 /a/b）。注意此时注册的静态路由需使用转义后的形式
+	UseEscapedPath bool
+
 	// UnescapePathValues if true, the path value will be unescaped.
 	// If UseRawPath is false (by default), the UnescapePathValues effectively is true,
 	// as url.Path gonna be used, which is already unescaped.
@@ -186,6 +192,12 @@ type Engine struct {
 	trustedCIDRs     []netip.Prefix
 	Validator        Validator
 	HTTPErrorHandler HTTPErrorHandler
+
+	// HTMLRender 用于 c.HTML 渲染，由 LoadHTMLGlob / LoadHTMLFiles / LoadHTMLFS / SetHTMLTemplate 设置
+	HTMLRender render.HTMLRender
+	// FuncMap 模板函数，见 SetFuncMap
+	FuncMap template.FuncMap
+	delims  render.Delims
 }
 
 var _ IRouter = (*Engine)(nil)
@@ -197,8 +209,9 @@ var _ IRouter = (*Engine)(nil)
 // - HandleMethodNotAllowed: false
 // - ForwardedByClientIP:    true
 // - UseRawPath:             false
+// - UseEscapedPath:         false
 // - UnescapePathValues:     true
-func New() *Engine {
+func New(opts ...OptionFunc) *Engine {
 	debugPrintWARNINGNew()
 	engine := &Engine{
 		RouterGroup: RouterGroup{
@@ -220,6 +233,8 @@ func New() *Engine {
 		ShutdownTimeout:        defaultShutdownTimeout,
 		trees:                  newMethodTrees(),
 		secureJSONPrefix:       "while(1);",
+		FuncMap:                template.FuncMap{},
+		delims:                 render.Delims{Left: "{{", Right: "}}"},
 		trustedProxies:         []string{"0.0.0.0/0", "::/0"},
 		trustedCIDRs:           defaultTrustedCIDRs,
 	}
@@ -228,15 +243,27 @@ func New() *Engine {
 	engine.pool.New = func() any {
 		return engine.allocateContext(engine.maxParams)
 	}
-	return engine
+	return engine.With(opts...)
 }
 
 // Default returns an Engine instance with the Logger and Recovery middleware already attached.
-func Default() *Engine {
+// opts 在挂载 Logger / Recovery 之后应用
+func Default(opts ...OptionFunc) *Engine {
 	debugPrintWARNINGDefault()
 	engine := New()
 	//logger和recovery中间件
 	engine.Use(Logger(), Recovery())
+	return engine.With(opts...)
+}
+
+// With 依次应用选项函数并返回 engine 本身，便于链式调用：
+//
+//	r := gin.New(func(e *gin.Engine) { e.HandleMethodNotAllowed = true })
+//	r.With(withTemplates, withTrustedProxies)
+func (engine *Engine) With(opts ...OptionFunc) *Engine {
+	for _, opt := range opts {
+		opt(engine)
+	}
 	return engine
 }
 
@@ -611,7 +638,10 @@ func (engine *Engine) handleHTTPRequest(c *context) {
 	httpMethod := req.Method
 	rPath := req.URL.Path
 	unescape := false
-	if engine.UseRawPath && len(req.URL.RawPath) > 0 {
+	if engine.UseEscapedPath {
+		rPath = req.URL.EscapedPath()
+		unescape = engine.UnescapePathValues
+	} else if engine.UseRawPath && len(req.URL.RawPath) > 0 {
 		rPath = req.URL.RawPath
 		unescape = engine.UnescapePathValues
 	}

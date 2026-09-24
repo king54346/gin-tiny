@@ -1,7 +1,3 @@
-// Copyright 2013 Julien Schmidt. All rights reserved.
-// Use of this source code is governed by a BSD-style license that can be found
-// at https://github.com/julienschmidt/httprouter/blob/master/LICENSE
-
 package ginTiny
 
 import (
@@ -641,7 +637,8 @@ walk:
 						}
 						val := path[:end]
 						if unescape {
-							if v, err := url.QueryUnescape(val); err == nil {
+							// 路径中的 + 是字面量，必须用 PathUnescape；QueryUnescape 会把 + 解码成空格（a+b 变成 "a b"）
+							if v, err := url.PathUnescape(val); err == nil {
 								val = v
 							}
 						}
@@ -697,7 +694,7 @@ walk:
 						}
 						val := path
 						if unescape {
-							if v, err := url.QueryUnescape(path); err == nil {
+							if v, err := url.PathUnescape(path); err == nil {
 								val = v
 							}
 						}

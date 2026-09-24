@@ -1,17 +1,12 @@
-// Copyright 2014 Manu Martinez-Almeida. All rights reserved.
-// Use of this source code is governed by a MIT style
-// license that can be found in the LICENSE file.
-
 package ginTiny
 
 import (
 	stdctx "context"
 	"errors"
 	"fmt"
-	"github.com/king54346/gin-tiny/binding"
-	"github.com/king54346/gin-tiny/render"
 	"html/template"
 	"io"
+	"io/fs"
 	"maps"
 	"math"
 	"mime/multipart"
@@ -24,6 +19,9 @@ import (
 	"strings"
 	"sync"
 	"time"
+
+	"github.com/king54346/gin-tiny/binding"
+	"github.com/king54346/gin-tiny/render"
 )
 
 // Content-Type MIME of the most common data formats.
@@ -43,8 +41,16 @@ const (
 	// BodyBytesKey indicates a default body bytes key.
 	BodyBytesKey = "_gin-gonic/gin/bodybyteskey"
 	// ContextKey is the key that a context returns itself for.
+	// （与上游 gin 保持一致，仍是字符串常量）
 	ContextKey = "_gin-gonic/gin/contextkey"
 )
+
+// ContextKeyType 是框架内部使用的 context key 类型。
+// 使用独立类型而不是字面量 0：Keys 支持任意类型的 key 后，用户 c.Set(0, x) 不会与之冲突
+type ContextKeyType int
+
+// ContextRequestKey 通过 c.Value(ContextRequestKey) 取得当前的 *http.Request
+const ContextRequestKey ContextKeyType = 0
 
 // abortIndex represents a typical value used in abort functions.
 const abortIndex int8 = math.MaxInt8 >> 1
@@ -143,7 +149,7 @@ type FormReader interface {
 	GetPostFormMap(key string) (map[string]string, bool)
 	FormFile(name string) (*multipart.FileHeader, error)
 	MultipartForm() (*multipart.Form, error)
-	SaveUploadedFile(file *multipart.FileHeader, dst string) error
+	SaveUploadedFile(file *multipart.FileHeader, dst string, perm ...fs.FileMode) error
 }
 
 // CookieAccessor 读写 Cookie
@@ -151,28 +157,32 @@ type CookieAccessor interface {
 	Cookie(name string) (*http.Cookie, error)
 	Cookies() []*http.Cookie
 	SetCookie(name, value string, maxAge int, path, domain string, secure, httpOnly bool)
+	SetCookieData(cookie *http.Cookie)
 	SetSameSite(samesite http.SameSite)
 }
 
 // KeyValueStore 请求级别的键值存储，并发安全。
 // 类型化读取推荐使用泛型函数 GetAs / MustGetAs，GetString 等方法为兼容 gin 保留
 type KeyValueStore interface {
-	Set(key string, val any)
-	Get(key string) (value any, exists bool)
-	MustGet(key string) any
-	GetString(key string) string
-	GetBool(key string) bool
-	GetInt(key string) int
-	GetInt64(key string) int64
-	GetUint(key string) uint
-	GetUint64(key string) uint64
-	GetFloat64(key string) float64
-	GetTime(key string) time.Time
-	GetDuration(key string) time.Duration
-	GetStringSlice(key string) []string
-	GetStringMap(key string) map[string]any
-	GetStringMapString(key string) map[string]string
-	GetStringMapStringSlice(key string) map[string][]string
+	Set(key any, val any)
+	Get(key any) (value any, exists bool)
+	MustGet(key any) any
+	Delete(key any)
+	// Keys 返回所有键值对的快照（副本）
+	Keys() map[any]any
+	GetString(key any) string
+	GetBool(key any) bool
+	GetInt(key any) int
+	GetInt64(key any) int64
+	GetUint(key any) uint
+	GetUint64(key any) uint64
+	GetFloat64(key any) float64
+	GetTime(key any) time.Time
+	GetDuration(key any) time.Duration
+	GetStringSlice(key any) []string
+	GetStringMap(key any) map[string]any
+	GetStringMapString(key any) map[string]string
+	GetStringMapStringSlice(key any) map[string][]string
 }
 
 // Binder 把请求数据绑定到结构体并校验。
@@ -184,6 +194,7 @@ type Binder interface {
 	BindQuery(obj any) error
 	BindYAML(obj any) error
 	BindTOML(obj any) error
+	BindPlain(obj any) error
 	BindHeader(obj any) error
 	BindUri(obj any) error
 	MustBindWith(obj any, b binding.Binding) error
@@ -193,6 +204,7 @@ type Binder interface {
 	ShouldBindQuery(obj any) error
 	ShouldBindYAML(obj any) error
 	ShouldBindTOML(obj any) error
+	ShouldBindPlain(obj any) error // 绑定到 *string 或 *[]byte
 	ShouldBindHeader(obj any) error
 	ShouldBindUri(obj any) error
 	ShouldBindWith(obj any, b binding.Binding) error
@@ -216,6 +228,7 @@ type Renderer interface {
 	YAML(code int, obj any)
 	TOML(code int, obj any)
 	ProtoBuf(code int, obj any)
+	HTML(code int, name string, obj any)
 	Data(code int, contentType string, data []byte)
 	DataFromReader(code int, contentLength int64, contentType string, reader io.Reader, extraHeaders map[string]string)
 	Blob(code int, contentType string, b []byte) error // 等价于 Data
@@ -249,12 +262,14 @@ type FlowController interface {
 	IsAborted() bool
 	AbortWithStatus(code int)
 	AbortWithStatusJSON(code int, jsonObj any)
+	AbortWithStatusPureJSON(code int, jsonObj any)
 	AbortWithError(code int, err error) *Error
 	Error(err error) *Error
 	Errors() errorMsgs
 	Handlers() HandlersChain
 	SetHandlers(handlers HandlersChain)
 	SetHandler(h HandlerFunc)
+	Handler() HandlerFunc // 主处理函数（处理链的最后一个）
 	HandlerName() string
 	HandlerNames() []string
 }
@@ -277,7 +292,7 @@ type context struct {
 	mu sync.RWMutex
 
 	// Keys 用于存储请求上下文的键值对
-	Keys map[string]any
+	keys map[any]any
 
 	// Errors 错误列表
 	errors errorMsgs
@@ -302,7 +317,7 @@ func (c *context) Reset() {
 	c.handlers = nil
 	c.index = -1
 	c.fullPath = ""
-	c.Keys = nil
+	c.keys = nil
 	// 和 responseWriter.reset 一样先 clear，避免底层数组继续引用上个请求的 *Error
 	clear(c.errors)
 	c.errors = c.errors[:0]
@@ -349,7 +364,7 @@ func (c *context) Copy() Context {
 
 	// 深拷贝 Keys
 	c.mu.RLock()
-	cp.Keys = maps.Clone(c.Keys)
+	cp.keys = maps.Clone(c.keys)
 	c.mu.RUnlock()
 
 	// 深拷贝 params
@@ -743,23 +758,34 @@ func (c *context) MultipartForm() (*multipart.Form, error) {
 	return c.request.MultipartForm, err
 }
 
-// SaveUploadedFile 保存上传的文件
-func (c *context) SaveUploadedFile(file *multipart.FileHeader, dst string) error {
+// SaveUploadedFile 保存上传的文件。perm 可选，指定新建文件的权限（默认 0o666，受 umask 影响，与 os.Create 相同）；
+// 所需目录按 0o750 创建，已存在的目录权限不变。
+// 与上游 gin 不同：上游的 perm 作用于目录，并且每次都会 chmod 父目录，保存到 /tmp/x 这类路径时会改掉 /tmp 的权限
+func (c *context) SaveUploadedFile(file *multipart.FileHeader, dst string, perm ...fs.FileMode) (err error) {
 	src, err := file.Open()
 	if err != nil {
 		return err
 	}
 	defer src.Close()
 
-	if err = os.MkdirAll(filepath.Dir(dst), 0750); err != nil {
+	if err = os.MkdirAll(filepath.Dir(dst), 0o750); err != nil {
 		return err
 	}
 
-	out, err := os.Create(dst)
+	mode := fs.FileMode(0o666)
+	if len(perm) > 0 {
+		mode = perm[0]
+	}
+	out, err := os.OpenFile(dst, os.O_WRONLY|os.O_CREATE|os.O_TRUNC, mode)
 	if err != nil {
 		return err
 	}
-	defer out.Close()
+	// 写入的数据可能在 Close 时才真正落盘，关闭失败（如磁盘已满）必须作为错误返回
+	defer func() {
+		if cerr := out.Close(); err == nil {
+			err = cerr
+		}
+	}()
 
 	_, err = io.Copy(out, src)
 	return err
@@ -773,69 +799,114 @@ func (c *context) SetSameSite(samesite http.SameSite) {
 	c.sameSite = samesite
 }
 
-// SetCookie 添加 Set-Cookie 头
+// SetCookie 添加 Set-Cookie 头。value 会经过 url.QueryEscape 编码，Cookie/Cookies 读取时自动解码
 func (c *context) SetCookie(name, value string, maxAge int, path, domain string, secure, httpOnly bool) {
-	if path == "" {
-		path = "/"
-	}
-	http.SetCookie(c.Response(), &http.Cookie{
+	c.SetCookieData(&http.Cookie{
 		Name:     name,
-		Value:    url.QueryEscape(value),
+		Value:    value,
 		MaxAge:   maxAge,
 		Path:     path,
 		Domain:   domain,
-		SameSite: c.sameSite,
 		Secure:   secure,
 		HttpOnly: httpOnly,
 	})
 }
 
-// Cookie 返回指定名称的 cookie
+// SetCookieData 以完整的 http.Cookie 设置 Cookie，可以使用 Expires、Partitioned 等 SetCookie 参数无法表达的属性。
+// 与 SetCookie 一致：Value 经过 url.QueryEscape 编码；Path 为空时默认为 "/"；
+// SameSite 未设置时使用 SetSameSite 配置的值。传入的 cookie 不会被修改
+func (c *context) SetCookieData(cookie *http.Cookie) {
+	ck := *cookie
+	ck.Value = url.QueryEscape(ck.Value)
+	if ck.Path == "" {
+		ck.Path = "/"
+	}
+	// SameSite 的零值 0 表示未设置（http.SameSiteDefaultMode 是 1，属于显式设置）
+	if ck.SameSite == 0 {
+		ck.SameSite = c.sameSite
+	}
+	http.SetCookie(c.Response(), &ck)
+}
+
+// Cookie 返回指定名称的 cookie，Value 已做 URL 解码，与 SetCookie 写入的原值一致。
+// 需要原始未解码的值时使用 c.Request().Cookie(name)
 func (c *context) Cookie(name string) (*http.Cookie, error) {
 	if c.request == nil {
 		return nil, ErrNilRequest
 	}
-	return c.request.Cookie(name)
+	ck, err := c.request.Cookie(name)
+	if err != nil {
+		return nil, err
+	}
+	decodeCookieValue(ck)
+	return ck, nil
 }
 
-// Cookies 返回所有 cookies
+// Cookies 返回所有 cookie，Value 已做 URL 解码
 func (c *context) Cookies() []*http.Cookie {
 	if c.request == nil {
 		return []*http.Cookie{}
 	}
-	return c.request.Cookies()
+	cookies := c.request.Cookies()
+	for _, ck := range cookies {
+		decodeCookieValue(ck)
+	}
+	return cookies
+}
+
+// decodeCookieValue 对 SetCookie 编码过的值做 URL 解码；不是合法编码的值保持原样。
+// http.Request.Cookie 每次都返回新的 *http.Cookie，原地修改不影响请求本身
+func decodeCookieValue(ck *http.Cookie) {
+	if v, err := url.QueryUnescape(ck.Value); err == nil {
+		ck.Value = v
+	}
 }
 
 // Set 存储键值对
-func (c *context) Set(key string, value any) {
+func (c *context) Set(key any, value any) {
 	c.mu.Lock()
 	defer c.mu.Unlock()
-	if c.Keys == nil {
-		c.Keys = make(map[string]any)
+	if c.keys == nil {
+		c.keys = make(map[any]any)
 	}
-	c.Keys[key] = value
+	c.keys[key] = value
 }
 
 // Get 返回指定键的值
-func (c *context) Get(key string) (value any, exists bool) {
+func (c *context) Get(key any) (value any, exists bool) {
 	c.mu.RLock()
 	defer c.mu.RUnlock()
-	value, exists = c.Keys[key]
+	value, exists = c.keys[key]
 	return
 }
 
+// Delete 删除指定键
+func (c *context) Delete(key any) {
+	c.mu.Lock()
+	defer c.mu.Unlock()
+	delete(c.keys, key)
+}
+
+// Keys 返回所有键值对的快照。
+// 返回副本而不是内部 map：遍历期间可以安全地调用 Set/Delete（持锁回调会死锁），修改副本也不影响 context
+func (c *context) Keys() map[any]any {
+	c.mu.RLock()
+	defer c.mu.RUnlock()
+	return maps.Clone(c.keys)
+}
+
 // MustGet 返回指定键的值，不存在则 panic
-func (c *context) MustGet(key string) any {
+func (c *context) MustGet(key any) any {
 	if value, exists := c.Get(key); exists {
 		return value
 	}
-	panic(fmt.Sprintf("Key \"%s\" does not exist", key))
+	panic(fmt.Sprintf("Key %#v does not exist", key))
 }
 
 // GetAs 以泛型方式从 Context 的 Keys 中取值，key 不存在或类型不匹配时 ok 为 false
 //
 //	user, ok := ginTiny.GetAs[*User](c, "user")
-func GetAs[T any](c Context, key string) (v T, ok bool) {
+func GetAs[T any](c Context, key any) (v T, ok bool) {
 	val, exists := c.Get(key)
 	if !exists {
 		return v, false
@@ -845,10 +916,10 @@ func GetAs[T any](c Context, key string) (v T, ok bool) {
 }
 
 // MustGetAs 与 GetAs 相同，但 key 不存在或类型不匹配时 panic
-func MustGetAs[T any](c Context, key string) T {
+func MustGetAs[T any](c Context, key any) T {
 	v, ok := GetAs[T](c, key)
 	if !ok {
-		panic(fmt.Sprintf("key %q does not exist or is not of type %T", key, v))
+		panic(fmt.Sprintf("key %#v does not exist or is not of type %T", key, v))
 	}
 	return v
 }
@@ -863,73 +934,73 @@ func ShouldBindAs[T any](c Context) (T, error) {
 }
 
 // getValue 是 GetString/GetInt 等方法的内部实现
-func getValue[T any](c *context, key string) T {
+func getValue[T any](c *context, key any) T {
 	v, _ := GetAs[T](c, key)
 	return v
 }
 
 // GetString 返回字符串值
-func (c *context) GetString(key string) string {
+func (c *context) GetString(key any) string {
 	return getValue[string](c, key)
 }
 
 // GetBool 返回布尔值
-func (c *context) GetBool(key string) bool {
+func (c *context) GetBool(key any) bool {
 	return getValue[bool](c, key)
 }
 
 // GetInt 返回整数值
-func (c *context) GetInt(key string) int {
+func (c *context) GetInt(key any) int {
 	return getValue[int](c, key)
 }
 
 // GetInt64 返回 int64 值
-func (c *context) GetInt64(key string) int64 {
+func (c *context) GetInt64(key any) int64 {
 	return getValue[int64](c, key)
 }
 
 // GetUint 返回无符号整数值
-func (c *context) GetUint(key string) uint {
+func (c *context) GetUint(key any) uint {
 	return getValue[uint](c, key)
 }
 
 // GetUint64 返回 uint64 值
-func (c *context) GetUint64(key string) uint64 {
+func (c *context) GetUint64(key any) uint64 {
 	return getValue[uint64](c, key)
 }
 
 // GetFloat64 返回 float64 值
-func (c *context) GetFloat64(key string) float64 {
+func (c *context) GetFloat64(key any) float64 {
 	return getValue[float64](c, key)
 }
 
 // GetTime 返回时间值
-func (c *context) GetTime(key string) time.Time {
+func (c *context) GetTime(key any) time.Time {
 	return getValue[time.Time](c, key)
 }
 
 // GetDuration 返回持续时间值
-func (c *context) GetDuration(key string) time.Duration {
+func (c *context) GetDuration(key any) time.Duration {
 	return getValue[time.Duration](c, key)
 }
 
 // GetStringSlice 返回字符串切片值
-func (c *context) GetStringSlice(key string) []string {
+func (c *context) GetStringSlice(key any) []string {
 	return getValue[[]string](c, key)
 }
 
 // GetStringMap 返回字符串映射值
-func (c *context) GetStringMap(key string) map[string]any {
+func (c *context) GetStringMap(key any) map[string]any {
 	return getValue[map[string]any](c, key)
 }
 
 // GetStringMapString 返回字符串到字符串的映射值
-func (c *context) GetStringMapString(key string) map[string]string {
+func (c *context) GetStringMapString(key any) map[string]string {
 	return getValue[map[string]string](c, key)
 }
 
 // GetStringMapStringSlice 返回字符串到字符串切片的映射值
-func (c *context) GetStringMapStringSlice(key string) map[string][]string {
+func (c *context) GetStringMapStringSlice(key any) map[string][]string {
 	return getValue[map[string][]string](c, key)
 }
 
@@ -967,6 +1038,12 @@ func (c *context) AbortWithStatus(code int) {
 func (c *context) AbortWithStatusJSON(code int, jsonObj any) {
 	c.Abort()
 	c.JSON(code, jsonObj)
+}
+
+// AbortWithStatusPureJSON 中止后续处理器，并以不转义 HTML 字符（<、>、&）的 JSON 响应
+func (c *context) AbortWithStatusPureJSON(code int, jsonObj any) {
+	c.Abort()
+	c.PureJSON(code, jsonObj)
 }
 
 // AbortWithError 中止并添加错误
@@ -1047,12 +1124,14 @@ func (c *context) BindXML(obj any) error          { return c.bindWith(obj, bindi
 func (c *context) BindQuery(obj any) error        { return c.bindWith(obj, binding.Query, true) }
 func (c *context) BindYAML(obj any) error         { return c.bindWith(obj, binding.YAML, true) }
 func (c *context) BindTOML(obj any) error         { return c.bindWith(obj, binding.TOML, true) }
+func (c *context) BindPlain(obj any) error        { return c.bindWith(obj, binding.Plain, true) }
 func (c *context) BindHeader(obj any) error       { return c.bindWith(obj, binding.Header, true) }
 func (c *context) ShouldBindJSON(obj any) error   { return c.bindWith(obj, binding.JSON, false) }
 func (c *context) ShouldBindXML(obj any) error    { return c.bindWith(obj, binding.XML, false) }
 func (c *context) ShouldBindQuery(obj any) error  { return c.bindWith(obj, binding.Query, false) }
 func (c *context) ShouldBindYAML(obj any) error   { return c.bindWith(obj, binding.YAML, false) }
 func (c *context) ShouldBindTOML(obj any) error   { return c.bindWith(obj, binding.TOML, false) }
+func (c *context) ShouldBindPlain(obj any) error  { return c.bindWith(obj, binding.Plain, false) }
 func (c *context) ShouldBindHeader(obj any) error { return c.bindWith(obj, binding.Header, false) }
 
 // BindUri 绑定 URI 参数
@@ -1154,6 +1233,11 @@ func (c *context) Render(code int, r render.Render) {
 	}
 
 	if err := r.Render(c.Response()); err != nil {
+		// 渲染失败且尚未写出任何内容（如 JSON 序列化失败、模板执行出错）时改为 500，
+		// 否则客户端会收到调用方指定的状态码（通常是 200）加空响应体
+		if !c.Response().Written() {
+			c.Status(http.StatusInternalServerError)
+		}
 		_ = c.Error(err)
 		c.Abort()
 	}
@@ -1203,6 +1287,14 @@ func (c *context) TOML(code int, obj any) {
 
 func (c *context) ProtoBuf(code int, obj any) {
 	c.Render(code, render.ProtoBuf{Data: obj})
+}
+
+// HTML 渲染 name 指定的模板（模板需先通过 engine.LoadHTMLGlob 等方法加载）
+func (c *context) HTML(code int, name string, obj any) {
+	if c.engine == nil || c.engine.HTMLRender == nil {
+		panic("ginTiny: HTML templates are not loaded, call LoadHTMLGlob / LoadHTMLFiles / LoadHTMLFS / SetHTMLTemplate first")
+	}
+	c.Render(code, c.engine.HTMLRender.Instance(name, obj))
 }
 
 func (c *context) String(code int, format string, values ...any) {
@@ -1472,18 +1564,16 @@ func (c *context) Err() error {
 	return c.requestContext().Err()
 }
 
-// Value 依次查找：0 → *http.Request，ContextKey → 自身，string 类型的 Keys，最后是请求 context
+// Value 依次查找：ContextRequestKey → *http.Request，ContextKey → 自身，Keys 中的值，最后是请求 context
 func (c *context) Value(key any) any {
-	if key == 0 {
+	if key == ContextRequestKey {
 		return c.request
 	}
 	if key == ContextKey {
 		return c
 	}
-	if keyAsString, ok := key.(string); ok {
-		if val, exists := c.Get(keyAsString); exists {
-			return val
-		}
+	if val, exists := c.Get(key); exists {
+		return val
 	}
 	return c.requestContext().Value(key)
 }
@@ -1505,6 +1595,11 @@ func (c *context) SetHandlers(handlers HandlersChain) {
 // SetHandler 设置单个处理器
 func (c *context) SetHandler(h HandlerFunc) {
 	c.handlers = HandlersChain{h}
+}
+
+// Handler 返回处理链中的主处理函数（最后一个）
+func (c *context) Handler() HandlerFunc {
+	return c.handlers.Last()
 }
 
 // HandlerName 返回主处理器名称

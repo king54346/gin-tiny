@@ -1,7 +1,3 @@
-// Copyright 2014 Manu Martinez-Almeida. All rights reserved.
-// Use of this source code is governed by a MIT style
-// license that can be found in the LICENSE file.
-
 package ginTiny
 
 import (
@@ -160,7 +156,7 @@ func TestContextReset(t *testing.T) {
 	c.Reset()
 
 	assert.False(t, c.IsAborted())
-	assert.Nil(t, c.Keys)
+	assert.Nil(t, c.keys)
 	assert.Nil(t, c.Accepted)
 	assert.Len(t, c.errors, 0)
 	assert.Empty(t, c.errors.Errors())
@@ -340,11 +336,11 @@ func TestContextCopy(t *testing.T) {
 	cp.Abort()
 	assert.True(t, cp.IsAborted())
 	assert.False(t, c.IsAborted(), "对副本调用 Abort 不影响原 context")
-	assert.Equal(t, cp.Keys, c.Keys)
+	assert.Equal(t, cp.keys, c.keys)
 	assert.Equal(t, cp.engine, c.engine)
 	assert.Equal(t, cp.Params(), c.Params())
 	cp.Set("foo", "notBar")
-	assert.False(t, cp.Keys["foo"] == c.Keys["foo"])
+	assert.False(t, cp.keys["foo"] == c.keys["foo"])
 }
 
 func TestContextHandlerName(t *testing.T) {
@@ -953,7 +949,7 @@ func TestContextRenderFile(t *testing.T) {
 	c.File("./gin.go")
 
 	assert.Equal(t, http.StatusOK, w.Code)
-	assert.Contains(t, w.Body.String(), "func New() *Engine {")
+	assert.Contains(t, w.Body.String(), "func New(opts ...OptionFunc) *Engine {")
 	// Content-Type='text/plain; charset=utf-8' when go version <= 1.16,
 	// else, Content-Type='text/x-go; charset=utf-8'
 	assert.NotEqual(t, "", w.Header().Get("Content-Type"))
@@ -967,7 +963,7 @@ func TestContextRenderFileFromFS(t *testing.T) {
 	c.FileFromFS("./gin.go", Dir(".", false))
 
 	assert.Equal(t, http.StatusOK, w.Code)
-	assert.Contains(t, w.Body.String(), "func New() *Engine {")
+	assert.Contains(t, w.Body.String(), "func New(opts ...OptionFunc) *Engine {")
 	// Content-Type='text/plain; charset=utf-8' when go version <= 1.16,
 	// else, Content-Type='text/x-go; charset=utf-8'
 	assert.NotEqual(t, "", w.Header().Get("Content-Type"))
@@ -983,7 +979,7 @@ func TestContextRenderAttachment(t *testing.T) {
 	c.FileAttachment("./gin.go", newFilename)
 
 	assert.Equal(t, 200, w.Code)
-	assert.Contains(t, w.Body.String(), "func New() *Engine {")
+	assert.Contains(t, w.Body.String(), "func New(opts ...OptionFunc) *Engine {")
 	assert.Equal(t, fmt.Sprintf("attachment; filename=\"%s\"", newFilename), w.Header().Get("Content-Disposition"))
 }
 
@@ -997,7 +993,7 @@ func TestContextRenderAndEscapeAttachment(t *testing.T) {
 	c.FileAttachment("./gin.go", maliciousFilename)
 
 	assert.Equal(t, 200, w.Code)
-	assert.Contains(t, w.Body.String(), "func New() *Engine {")
+	assert.Contains(t, w.Body.String(), "func New(opts ...OptionFunc) *Engine {")
 	assert.Equal(t, fmt.Sprintf("attachment; filename=\"%s\"", actualEscapedResponseFilename), w.Header().Get("Content-Disposition"))
 }
 
@@ -1010,7 +1006,7 @@ func TestContextRenderUTF8Attachment(t *testing.T) {
 	c.FileAttachment("./gin.go", newFilename)
 
 	assert.Equal(t, 200, w.Code)
-	assert.Contains(t, w.Body.String(), "func New() *Engine {")
+	assert.Contains(t, w.Body.String(), "func New(opts ...OptionFunc) *Engine {")
 	assert.Equal(t, `attachment; filename*=UTF-8''`+url.QueryEscape(newFilename), w.Header().Get("Content-Disposition"))
 }
 
@@ -2170,7 +2166,10 @@ func TestContextValueFromRequestContext(t *testing.T) {
 	// string 类型的 key 优先从 Keys 中查找
 	assert.Equal(t, "from keys", c.Value("shadowed"))
 	assert.Nil(t, c.Value("missing"))
-	assert.Equal(t, c.request, c.Value(0))
+	assert.Equal(t, c.request, c.Value(ContextRequestKey))
+	// 字面量 0 不再是特殊 key，可以作为普通的键使用
+	c.Set(0, "zero")
+	assert.Equal(t, "zero", c.Value(0))
 	assert.Equal(t, c, c.Value(ContextKey))
 }
 

@@ -1,7 +1,3 @@
-// Copyright 2013 Julien Schmidt. All rights reserved.
-// Use of this source code is governed by a BSD-style license that can be found
-// at https://github.com/julienschmidt/httprouter/blob/master/LICENSE
-
 package ginTiny
 
 import (
@@ -348,10 +344,11 @@ func TestUnescapeParameters(t *testing.T) {
 		{"/cmd/test/", false, "/cmd/:tool/", Params{Param{Key: "tool", Value: "test"}}},
 		{"/cmd/test", true, "", Params{Param{Key: "tool", Value: "test"}}},
 		{"/src/some/file.png", false, "/src/*filepath", Params{Param{Key: "filepath", Value: "/some/file.png"}}},
-		{"/src/some/file+test.png", false, "/src/*filepath", Params{Param{Key: "filepath", Value: "/some/file test.png"}}},
+		// 路径中的 + 是字面量（RFC 3986），与默认模式下 URL.Path 的解码结果一致，不能当作空格
+		{"/src/some/file+test.png", false, "/src/*filepath", Params{Param{Key: "filepath", Value: "/some/file+test.png"}}},
 		{"/src/some/file++++%%%%test.png", false, "/src/*filepath", Params{Param{Key: "filepath", Value: "/some/file++++%%%%test.png"}}},
 		{"/src/some/file%2Ftest.png", false, "/src/*filepath", Params{Param{Key: "filepath", Value: "/some/file/test.png"}}},
-		{"/search/someth!ng+in+ünìcodé", false, "/search/:query", Params{Param{Key: "query", Value: "someth!ng in ünìcodé"}}},
+		{"/search/someth!ng+in+ünìcodé", false, "/search/:query", Params{Param{Key: "query", Value: "someth!ng+in+ünìcodé"}}},
 		{"/info/gordon/project/go", false, "/info/:user/project/:project", Params{Param{Key: "user", Value: "gordon"}, Param{Key: "project", Value: "go"}}},
 		{"/info/slash%2Fgordon", false, "/info/:user", Params{Param{Key: "user", Value: "slash/gordon"}}},
 		{"/info/slash%2Fgordon/project/Project%20%231", false, "/info/:user/project/:project", Params{Param{Key: "user", Value: "slash/gordon"}, Param{Key: "project", Value: "Project #1"}}},

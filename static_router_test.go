@@ -417,10 +417,10 @@ func currentUser(kv KeyValueStore) (string, bool) {
 // fakeKV 只需实现 KeyValueStore，无需实现 Context 的其余方法
 type fakeKV struct {
 	KeyValueStore
-	m map[string]any
+	m map[any]any
 }
 
-func (f fakeKV) Get(key string) (any, bool) { v, ok := f.m[key]; return v, ok }
+func (f fakeKV) Get(key any) (any, bool) { v, ok := f.m[key]; return v, ok }
 
 func TestNarrowInterfaces(t *testing.T) {
 	// 真实请求中直接传入 Context
@@ -433,7 +433,7 @@ func TestNarrowInterfaces(t *testing.T) {
 	assert.Equal(t, "alice", PerformRequest(r, http.MethodGet, "/me").Body.String())
 
 	// 单元测试中用最小实现替代
-	name, ok := currentUser(fakeKV{m: map[string]any{"user": "bob"}})
+	name, ok := currentUser(fakeKV{m: map[any]any{"user": "bob"}})
 	assert.True(t, ok)
 	assert.Equal(t, "bob", name)
 }

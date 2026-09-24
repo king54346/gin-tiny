@@ -1,16 +1,13 @@
-// Copyright 2014 Manu Martinez-Almeida. All rights reserved.
-// Use of this source code is governed by a MIT style
-// license that can be found in the LICENSE file.
-
 package ginTiny
 
 import (
 	"crypto/subtle"
 	"encoding/base64"
-	"github.com/king54346/gin-tiny/internal/bytesconv"
 	"net/http"
 	"strconv"
 	"strings"
+
+	"github.com/king54346/gin-tiny/internal/bytesconv"
 )
 
 // AuthUserKey is the cookie name for user credential in basic auth.
@@ -92,4 +89,27 @@ func processAccounts(accounts Accounts) authPairs {
 func authorizationHeader(user, password string) string {
 	base := user + ":" + password
 	return "Basic " + base64.StdEncoding.EncodeToString(bytesconv.StringToBytes(base))
+}
+
+// AuthProxyUserKey 是 BasicAuthForProxy 认证通过后，在 Context 中保存代理用户名使用的 key
+const AuthProxyUserKey = "proxy_user"
+
+// BasicAuthForProxy 返回代理认证（Proxy-Authorization）中间件，用于实现 HTTP 正向代理。
+// 认证失败时返回 407 Proxy Authentication Required 并附带 Proxy-Authenticate 头；
+// 成功时代理用户名可以通过 c.MustGet(gin.AuthProxyUserKey) 读取。realm 为空时使用 "Proxy Authorization Required"
+func BasicAuthForProxy(accounts Accounts, realm string) HandlerFunc {
+	if realm == "" {
+		realm = "Proxy Authorization Required"
+	}
+	realm = "Basic realm=" + strconv.Quote(realm)
+	pairs := processAccounts(accounts)
+	return func(c Context) {
+		proxyUser, found := pairs.searchCredential(c.RequestHeader("Proxy-Authorization"))
+		if !found {
+			c.Header("Proxy-Authenticate", realm)
+			c.AbortWithStatus(http.StatusProxyAuthRequired)
+			return
+		}
+		c.Set(AuthProxyUserKey, proxyUser)
+	}
 }

@@ -1,15 +1,12 @@
-// Copyright 2014 Manu Martinez-Almeida. All rights reserved.
-// Use of this source code is governed by a MIT style
-// license that can be found in the LICENSE file.
-
 package ginTiny
 
 import (
 	"flag"
-	"github.com/king54346/gin-tiny/binding"
 	"io"
 	"os"
 	"sync/atomic"
+
+	"github.com/king54346/gin-tiny/binding"
 )
 
 // EnvGinMode indicates environment name for gin mode.
