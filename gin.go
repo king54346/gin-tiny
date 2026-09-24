@@ -5,23 +5,29 @@
 package ginTiny
 
 import (
+	stdctx "context"
+	"errors"
 	"fmt"
-	"gin-tiny/internal/bytesconv"
-	"github.com/patrickmn/go-cache"
 	"net"
 	"net/http"
+	"net/netip"
 	"os"
 	"path"
 	"regexp"
+	"slices"
 	"strings"
 	"sync"
 	"time"
 
+	"github.com/king54346/gin-tiny/internal/bytesconv"
 	"golang.org/x/net/http2"
 	"golang.org/x/net/http2/h2c"
 )
 
-const defaultMultipartMemory = 32 << 20 // 32 MB
+const (
+	defaultMultipartMemory = 32 << 20 // 32 MB
+	defaultShutdownTimeout = 10 * time.Second
+)
 
 var (
 	default404Body = []byte("404 page not found")
@@ -30,15 +36,10 @@ var (
 
 var defaultPlatform string
 
-var defaultTrustedCIDRs = []*net.IPNet{
-	{ // 0.0.0.0/0 (IPv4)
-		IP:   net.IP{0x0, 0x0, 0x0, 0x0},
-		Mask: net.IPMask{0x0, 0x0, 0x0, 0x0},
-	},
-	{ // ::/0 (IPv6)
-		IP:   net.IP{0x0, 0x0, 0x0, 0x0, 0x0, 0x0, 0x0, 0x0, 0x0, 0x0, 0x0, 0x0, 0x0, 0x0, 0x0, 0x0},
-		Mask: net.IPMask{0x0, 0x0, 0x0, 0x0, 0x0, 0x0, 0x0, 0x0, 0x0, 0x0, 0x0, 0x0, 0x0, 0x0, 0x0, 0x0},
-	},
+// defaultTrustedCIDRs 默认信任所有代理（0.0.0.0/0 和 ::/0）
+var defaultTrustedCIDRs = []netip.Prefix{
+	netip.PrefixFrom(netip.IPv4Unspecified(), 0),
+	netip.PrefixFrom(netip.IPv6Unspecified(), 0),
 }
 
 var regSafePrefix = regexp.MustCompile("[^a-zA-Z0-9/-]+")
@@ -73,7 +74,7 @@ type RouteInfo struct {
 type RoutesInfo []RouteInfo
 
 type Validator interface {
-	Validate(i interface{}) error
+	Validate(i any) error
 }
 
 type HTTPErrorHandler func(err error, c Context)
@@ -157,11 +158,18 @@ type Engine struct {
 	// method call.
 	MaxMultipartMemory int64
 
+	// ShutdownTimeout 是 RunContext 等方法在 ctx 取消后等待进行中请求结束的最长时间，
+	// 超时后强制关闭剩余连接。<= 0 表示一直等待。默认 10 秒。
+	ShutdownTimeout time.Duration
+
 	// UseH2C enable h2c support.
 	// h2c 是否开启，http/2的变种，但是不像通常的HTTP/2那样通过TLS加密
 	UseH2C bool
 
-	// ContextWithFallback enable fallback Context.Deadline(), context.Done(), context.Err() and Context.Value() when context.Request.context() is not nil.
+	// ContextWithFallback 已不再起作用：Context 的 Deadline/Done/Err/Value 始终基于 Request().Context()，
+	// Copy() 得到的副本通过 context.WithoutCancel 脱离原请求的取消信号，可安全用于异步任务。
+	//
+	// Deprecated: 无需再设置，保留字段仅为兼容旧代码。
 	ContextWithFallback bool
 
 	secureJSONPrefix string
@@ -175,8 +183,7 @@ type Engine struct {
 	maxParams        uint16
 	maxSections      uint16
 	trustedProxies   []string
-	trustedCIDRs     []*net.IPNet
-	routeCache       *cache.Cache // 用于缓存路由查找结果
+	trustedCIDRs     []netip.Prefix
 	Validator        Validator
 	HTTPErrorHandler HTTPErrorHandler
 }
@@ -210,12 +217,12 @@ func New() *Engine {
 		RemoveExtraSlash:       false,
 		UnescapePathValues:     true,
 		MaxMultipartMemory:     defaultMultipartMemory,
+		ShutdownTimeout:        defaultShutdownTimeout,
 		trees:                  newMethodTrees(),
 		secureJSONPrefix:       "while(1);",
 		trustedProxies:         []string{"0.0.0.0/0", "::/0"},
 		trustedCIDRs:           defaultTrustedCIDRs,
 	}
-	engine.routeCache = cache.New(5*time.Minute, 10*time.Minute)
 	engine.RouterGroup.engine = engine
 	engine.HTTPErrorHandler = engine.DefaultHTTPErrorHandler
 	engine.pool.New = func() any {
@@ -293,14 +300,8 @@ func (engine *Engine) addRoute(method, path string, handlers HandlersChain) {
 
 	debugPrintRoute(method, path, handlers)
 
-	// 获取对应方法的路由树根节点
-	root := engine.trees.getMethodTree(method)
-	if root == nil {
-		root = new(node)
-		root.fullPath = "/"
-		engine.trees.initMethodTree(methodTree{method: method, root: root})
-	}
-	root.addRoute(path, handlers)
+	// 树负责冲突检测和通配符校验，不含通配符的路由会同时写入该方法的静态索引（见 methodTree）
+	engine.trees.getOrCreateTree(method).addRoute(path, handlers)
 
 	// Update maxParams
 	if paramsCount := countParams(path); paramsCount > engine.maxParams {
@@ -312,27 +313,8 @@ func (engine *Engine) addRoute(method, path string, handlers HandlersChain) {
 	}
 }
 
-// 添加多方法和静态的路由
-func (engine *Engine) addOtherRoute(method, path string, handlers HandlersChain) {
-	assert1(path[0] == '/', "path must begin with '/'")
-	assert1(method != "", "HTTP method can not be empty")
-	assert1(len(handlers) > 0, "there must be at least one handler")
-
-	debugPrintRoute(method, path, handlers)
-
-	engine.trees.addStaticRouter(method, path, handlers)
-
-	// 计算路径中的参数数量
-	if paramsCount := countParams(path); paramsCount > engine.maxParams {
-		engine.maxParams = paramsCount
-	}
-	// 计算路径中的路径段数量
-	if sectionsCount := countSections(path); sectionsCount > engine.maxSections {
-		engine.maxSections = sectionsCount
-	}
-}
-
 // Routes 用于获取引擎中所有已注册的路由信息，返回RoutesInfo
+// 静态索引只是树的副本，遍历树即可得到全部路由
 func (engine *Engine) Routes() (routes RoutesInfo) {
 	for _, tree := range engine.trees.getNotNullMethodTree() {
 		routes = iterate("", tree.method, routes, tree.root)
@@ -358,47 +340,52 @@ func iterate(path, method string, routes RoutesInfo, root *node) RoutesInfo {
 }
 
 // Run attaches the router to a http.Server and starts listening and serving HTTP requests.
-// It is a shortcut for http.ListenAndServe(addr, router)
+// It is a shortcut for RunContext(context.Background(), addr...).
 // Note: this method will block the calling goroutine indefinitely unless an error happens.
-func (engine *Engine) Run(addr ...string) (err error) {
-	defer func() { debugPrintError(err) }()
-
-	if engine.isUnsafeTrustedProxies() {
-		debugPrint("[WARNING] You trusted all proxies, this is NOT safe. We recommend you to set a value.\n" +
-			"Please check https://pkg.go.dev/github.com/gin-gonic/gin#readme-don-t-trust-all-proxies for details.")
-	}
-
-	address := resolveAddress(addr)
-	debugPrint("Listening and serving HTTP on %s\n", address)
-	err = http.ListenAndServe(address, engine.Handler())
-	return
+func (engine *Engine) Run(addr ...string) error {
+	return engine.RunContext(stdctx.Background(), addr...)
 }
 
-func (engine *Engine) prepareTrustedCIDRs() ([]*net.IPNet, error) {
+// RunContext 与 Run 相同，但在 ctx 取消后优雅关闭：停止接收新连接，等待进行中的请求处理完毕
+// （最长 Engine.ShutdownTimeout），然后返回 nil。配合 signal.NotifyContext 使用：
+//
+//	ctx, stop := signal.NotifyContext(context.Background(), os.Interrupt, syscall.SIGTERM)
+//	defer stop()
+//	if err := router.RunContext(ctx, ":8080"); err != nil {
+//		log.Fatal(err)
+//	}
+func (engine *Engine) RunContext(ctx stdctx.Context, addr ...string) (err error) {
+	defer func() { debugPrintError(err) }()
+
+	address := resolveAddress(addr)
+	listener, err := net.Listen("tcp", address)
+	if err != nil {
+		return err
+	}
+	debugPrint("Listening and serving HTTP on %s\n", listener.Addr())
+	return engine.serve(ctx, listener, "", "")
+}
+
+func (engine *Engine) prepareTrustedCIDRs() ([]netip.Prefix, error) {
 	if engine.trustedProxies == nil {
 		return nil, nil
 	}
 
-	cidr := make([]*net.IPNet, 0, len(engine.trustedProxies))
+	cidr := make([]netip.Prefix, 0, len(engine.trustedProxies))
 	for _, trustedProxy := range engine.trustedProxies {
 		if !strings.Contains(trustedProxy, "/") {
-			ip := parseIP(trustedProxy)
-			if ip == nil {
+			ip, err := parseAddr(trustedProxy)
+			if err != nil {
 				return cidr, &net.ParseError{Type: "IP address", Text: trustedProxy}
 			}
-
-			switch len(ip) {
-			case net.IPv4len:
-				trustedProxy += "/32"
-			case net.IPv6len:
-				trustedProxy += "/128"
-			}
+			cidr = append(cidr, netip.PrefixFrom(ip, ip.BitLen()))
+			continue
 		}
-		_, cidrNet, err := net.ParseCIDR(trustedProxy)
+		prefix, err := netip.ParsePrefix(trustedProxy)
 		if err != nil {
-			return cidr, err
+			return cidr, &net.ParseError{Type: "CIDR address", Text: trustedProxy}
 		}
-		cidr = append(cidr, cidrNet)
+		cidr = append(cidr, prefix.Masked())
 	}
 	return cidr, nil
 }
@@ -418,7 +405,15 @@ func (engine *Engine) SetTrustedProxies(trustedProxies []string) error {
 
 // isUnsafeTrustedProxies checks if Engine.trustedCIDRs contains all IPs, it's not safe if it has (returns true)
 func (engine *Engine) isUnsafeTrustedProxies() bool {
-	return engine.isTrustedProxy(net.ParseIP("0.0.0.0")) || engine.isTrustedProxy(net.ParseIP("::"))
+	return engine.isTrustedProxy(netip.IPv4Unspecified()) || engine.isTrustedProxy(netip.IPv6Unspecified())
+}
+
+// warnUnsafeTrustedProxies 在信任所有代理时打印警告
+func (engine *Engine) warnUnsafeTrustedProxies() {
+	if engine.isUnsafeTrustedProxies() {
+		debugPrint("[WARNING] You trusted all proxies, this is NOT safe. We recommend you to set a value.\n" +
+			"Please check https://pkg.go.dev/github.com/gin-gonic/gin#readme-don-t-trust-all-proxies for details.")
+	}
 }
 
 // parseTrustedProxies parse Engine.trustedProxies to Engine.trustedCIDRs
@@ -429,10 +424,11 @@ func (engine *Engine) parseTrustedProxies() error {
 }
 
 // isTrustedProxy will check whether the IP address is included in the trusted list according to Engine.trustedCIDRs
-func (engine *Engine) isTrustedProxy(ip net.IP) bool {
-	if engine.trustedCIDRs == nil {
+func (engine *Engine) isTrustedProxy(ip netip.Addr) bool {
+	if !ip.IsValid() {
 		return false
 	}
+	ip = ip.Unmap() // ::ffff:1.2.3.4 按 IPv4 处理
 	for _, cidr := range engine.trustedCIDRs {
 		if cidr.Contains(ip) {
 			return true
@@ -446,74 +442,70 @@ func (engine *Engine) validateHeader(header string) (clientIP string, valid bool
 	if header == "" {
 		return "", false
 	}
-	items := strings.Split(header, ",")
-	for i := len(items) - 1; i >= 0; i-- {
-		ipStr := strings.TrimSpace(items[i])
-		ip := net.ParseIP(ipStr)
-		if ip == nil {
+	// X-Forwarded-For 由代理逐级追加，从右往左检查，遇到第一个不受信任的地址即为客户端 IP
+	// 用 LastIndexByte 从后向前切分，避免 strings.Split 的切片分配
+	for header != "" {
+		item := header
+		if i := strings.LastIndexByte(header, ','); i >= 0 {
+			item, header = header[i+1:], header[:i]
+		} else {
+			header = ""
+		}
+		ipStr := strings.TrimSpace(item)
+		ip, err := netip.ParseAddr(ipStr)
+		if err != nil {
 			break
 		}
-
-		// X-Forwarded-For is appended by proxy
-		// Check IPs in reverse order and stop when find untrusted proxy
-		if (i == 0) || (!engine.isTrustedProxy(ip)) {
+		if header == "" || !engine.isTrustedProxy(ip) {
 			return ipStr, true
 		}
 	}
 	return "", false
 }
 
-// parseIP parse a string representation of an IP and returns a net.IP with the
-// minimum byte representation or nil if input is invalid.
-func parseIP(ip string) net.IP {
-	parsedIP := net.ParseIP(ip)
-
-	if ipv4 := parsedIP.To4(); ipv4 != nil {
-		// return ip in a 4-byte representation
-		return ipv4
+// parseAddr 解析 IP 字符串，IPv4-mapped IPv6 地址会被还原为 IPv4
+func parseAddr(ip string) (netip.Addr, error) {
+	addr, err := netip.ParseAddr(ip)
+	if err != nil {
+		return netip.Addr{}, err
 	}
-
-	// return ip in a 16-byte representation or nil
-	return parsedIP
+	return addr.Unmap(), nil
 }
 
 // RunTLS attaches the router to a http.Server and starts listening and serving HTTPS (secure) requests.
-// It is a shortcut for http.ListenAndServeTLS(addr, certFile, keyFile, router)
+// It is a shortcut for RunTLSContext(context.Background(), addr, certFile, keyFile).
 // Note: this method will block the calling goroutine indefinitely unless an error happens.
-func (engine *Engine) RunTLS(addr, certFile, keyFile string) (err error) {
-	debugPrint("Listening and serving HTTPS on %s\n", addr)
+func (engine *Engine) RunTLS(addr, certFile, keyFile string) error {
+	return engine.RunTLSContext(stdctx.Background(), addr, certFile, keyFile)
+}
+
+// RunTLSContext 与 RunTLS 相同，但在 ctx 取消后优雅关闭，见 RunContext
+func (engine *Engine) RunTLSContext(ctx stdctx.Context, addr, certFile, keyFile string) (err error) {
 	defer func() { debugPrintError(err) }()
 
-	if engine.isUnsafeTrustedProxies() {
-		debugPrint("[WARNING] You trusted all proxies, this is NOT safe. We recommend you to set a value.\n" +
-			"Please check https://pkg.go.dev/github.com/gin-gonic/gin#readme-don-t-trust-all-proxies for details.")
+	listener, err := net.Listen("tcp", addr)
+	if err != nil {
+		return err
 	}
-
-	err = http.ListenAndServeTLS(addr, certFile, keyFile, engine.Handler())
-	return
+	debugPrint("Listening and serving HTTPS on %s\n", listener.Addr())
+	return engine.serve(ctx, listener, certFile, keyFile)
 }
 
 // RunUnix attaches the router to a http.Server and starts listening and serving HTTP requests
 // through the specified unix socket (i.e. a file).
 // Note: this method will block the calling goroutine indefinitely unless an error happens.
+// 需要优雅关闭时，可自行 net.Listen("unix", file) 后调用 RunListenerContext。
 func (engine *Engine) RunUnix(file string) (err error) {
 	debugPrint("Listening and serving HTTP on unix:/%s", file)
 	defer func() { debugPrintError(err) }()
-
-	if engine.isUnsafeTrustedProxies() {
-		debugPrint("[WARNING] You trusted all proxies, this is NOT safe. We recommend you to set a value.\n" +
-			"Please check https://github.com/gin-gonic/gin/blob/master/docs/doc.md#dont-trust-all-proxies for details.")
-	}
 
 	listener, err := net.Listen("unix", file)
 	if err != nil {
 		return
 	}
-	defer listener.Close()
 	defer os.Remove(file)
 
-	err = http.Serve(listener, engine.Handler())
-	return
+	return engine.serve(stdctx.Background(), listener, "", "")
 }
 
 // RunFd attaches the router to a http.Server and starts listening and serving HTTP requests
@@ -523,34 +515,69 @@ func (engine *Engine) RunFd(fd int) (err error) {
 	debugPrint("Listening and serving HTTP on fd@%d", fd)
 	defer func() { debugPrintError(err) }()
 
-	if engine.isUnsafeTrustedProxies() {
-		debugPrint("[WARNING] You trusted all proxies, this is NOT safe. We recommend you to set a value.\n" +
-			"Please check https://github.com/gin-gonic/gin/blob/master/docs/doc.md#dont-trust-all-proxies for details.")
-	}
-
 	f := os.NewFile(uintptr(fd), fmt.Sprintf("fd@%d", fd))
 	listener, err := net.FileListener(f)
 	if err != nil {
 		return
 	}
-	defer listener.Close()
-	err = engine.RunListener(listener)
-	return
+	return engine.serve(stdctx.Background(), listener, "", "")
 }
 
 // RunListener attaches the router to a http.Server and starts listening and serving HTTP requests
 // through the specified net.Listener
-func (engine *Engine) RunListener(listener net.Listener) (err error) {
+func (engine *Engine) RunListener(listener net.Listener) error {
+	return engine.RunListenerContext(stdctx.Background(), listener)
+}
+
+// RunListenerContext 与 RunListener 相同，但在 ctx 取消后优雅关闭，见 RunContext
+func (engine *Engine) RunListenerContext(ctx stdctx.Context, listener net.Listener) (err error) {
 	debugPrint("Listening and serving HTTP on listener what's bind with address@%s", listener.Addr())
 	defer func() { debugPrintError(err) }()
 
-	if engine.isUnsafeTrustedProxies() {
-		debugPrint("[WARNING] You trusted all proxies, this is NOT safe. We recommend you to set a value.\n" +
-			"Please check https://github.com/gin-gonic/gin/blob/master/docs/doc.md#dont-trust-all-proxies for details.")
+	return engine.serve(ctx, listener, "", "")
+}
+
+// serve 是所有 Run* 方法的公共实现。certFile/keyFile 非空时以 TLS 方式服务。
+// listener 的所有权转交给 serve，返回时一定已被关闭。
+//
+// ctx 取消后调用 http.Server.Shutdown：先关闭 listener 不再接收新连接，再等待进行中的请求结束。
+// 等待时间受 ShutdownTimeout 限制，超时后强制关闭剩余连接并返回超时错误；正常关闭返回 nil。
+func (engine *Engine) serve(ctx stdctx.Context, listener net.Listener, certFile, keyFile string) error {
+	engine.warnUnsafeTrustedProxies()
+
+	srv := &http.Server{Handler: engine.Handler()}
+	serveErr := make(chan error, 1)
+	go func() {
+		if certFile != "" || keyFile != "" {
+			serveErr <- srv.ServeTLS(listener, certFile, keyFile)
+			return
+		}
+		serveErr <- srv.Serve(listener)
+	}()
+
+	select {
+	case err := <-serveErr:
+		// 未调用 Shutdown 就返回，说明服务本身出错（例如证书无效），ctx 此时没有被取消
+		return err
+	case <-ctx.Done():
 	}
 
-	err = http.Serve(listener, engine.Handler())
-	return
+	// ctx 已取消，关闭流程必须使用不会被取消的 context，否则 Shutdown 会立刻放弃等待
+	shutdownCtx := stdctx.WithoutCancel(ctx)
+	if engine.ShutdownTimeout > 0 {
+		var cancel stdctx.CancelFunc
+		shutdownCtx, cancel = stdctx.WithTimeout(shutdownCtx, engine.ShutdownTimeout)
+		defer cancel()
+	}
+
+	if err := srv.Shutdown(shutdownCtx); err != nil {
+		_ = srv.Close()
+		return fmt.Errorf("ginTiny: graceful shutdown did not finish: %w", err)
+	}
+	if err := <-serveErr; !errors.Is(err, http.ErrServerClosed) {
+		return err
+	}
+	return nil
 }
 
 // ServeHTTP conforms to the http.Handler interface.
@@ -565,9 +592,13 @@ func (engine *Engine) ServeHTTP(w http.ResponseWriter, req *http.Request) {
 	engine.pool.Put(c)
 }
 
-// HandleContext 用于重新处理一个已经被重写（如 c.Request.URL.Path 被修改）的上下文（context）。
-// 他会重置上下文的状态，并将其恢复到原来的状态（如 c.index），然后重新处理 HTTP 请求。
-func (engine *Engine) HandleContext(c *context) {
+// HandleContext 用于重新处理一个已经被重写（如 c.Request().URL.Path 被修改）的上下文。
+// 它会重置上下文的状态，重新走一遍路由匹配，结束后恢复原来的 index。
+func (engine *Engine) HandleContext(ctx Context) {
+	c, ok := ctx.(*context)
+	if !ok {
+		panic("ginTiny: HandleContext only accepts Context created by ginTiny")
+	}
 	oldIndexValue := c.index
 	c.Reset()
 	engine.handleHTTPRequest(c)
@@ -576,97 +607,76 @@ func (engine *Engine) HandleContext(c *context) {
 }
 
 func (engine *Engine) handleHTTPRequest(c *context) {
-	httpMethod := c.Request().Method
-	rPath := c.Request().URL.Path
+	req := c.Request()
+	httpMethod := req.Method
+	rPath := req.URL.Path
 	unescape := false
-	if engine.UseRawPath && len(c.Request().URL.RawPath) > 0 {
-		rPath = c.Request().URL.RawPath
+	if engine.UseRawPath && len(req.URL.RawPath) > 0 {
+		rPath = req.URL.RawPath
 		unescape = engine.UnescapePathValues
 	}
 
 	if engine.RemoveExtraSlash {
 		rPath = cleanPath(rPath)
 	}
-	// 找到对应HTTP方法的路由树
-	t := engine.trees
-	// 先通过staticRouter查找
-	handlers, exist := t.findHandlers(rPath, httpMethod)
-	if exist {
-		if handlers != nil {
-			c.handlers = handlers
-			c.fullPath = rPath
+
+	// 1. 查找路由：methodTree 内部先查静态索引，未命中再走 radix 树
+	if tree := engine.trees.getTree(httpMethod); tree != nil {
+		value := tree.getValue(rPath, c.params, c.skippedNodes, unescape)
+		if value.params != nil {
+			c.params = value.params
+		}
+		if value.handlers != nil {
+			c.handlers = value.handlers
+			c.fullPath = value.fullPath
 			c.Next()
 			c.writermem.WriteHeaderNow()
 			return
 		}
-	} else {
-		methodTree := t.getMethodTree(httpMethod)
-		if methodTree != nil {
-			root := methodTree
-
-			// 构建缓存键
-			cacheKey := httpMethod + "-" + rPath
-
-			// 尝试从缓存获取
-			if cached, ok := engine.routeCache.Get(cacheKey); ok {
-				cachedValue := cached.(nodeValue)
-				if cachedValue.handlers != nil {
-					c.handlers = cachedValue.handlers
-					c.fullPath = cachedValue.fullPath
-					// 如果有参数，需要重新解析
-					if cachedValue.params != nil && len(*cachedValue.params) > 0 {
-						// 需要重新解析参数，因为参数值可能不同
-						value := root.getValue(rPath, c.params, c.skippedNodes, unescape)
-						c.params = value.params
-					}
-					c.Next()
-					c.writermem.WriteHeaderNow()
-					return
-				}
-			}
-			// 从路由树中查找handlers
-			value := root.getValue(rPath, c.params, c.skippedNodes, unescape)
-			// 将结果存入缓存
-			if value.handlers != nil {
-				engine.routeCache.Set(cacheKey, value, cache.DefaultExpiration)
-			}
-			if value.params != nil {
-				c.params = value.params
-			}
-			if value.handlers != nil {
-				c.handlers = value.handlers
-				c.fullPath = value.fullPath
-				c.Next()
-				c.writermem.WriteHeaderNow()
+		// 2. 未命中：尾斜杠和大小写修正重定向，全部由树完成
+		if httpMethod != http.MethodConnect && rPath != "/" {
+			if value.tsr && engine.RedirectTrailingSlash {
+				redirectTrailingSlash(c)
 				return
 			}
-			if httpMethod != http.MethodConnect && rPath != "/" {
-				if value.tsr && engine.RedirectTrailingSlash {
-					redirectTrailingSlash(c)
-					return
-				}
-				// 处理固定路径重定向 例如将 /FOO 重定向到 /foo，或者处理多余斜杠如 //foo 重定向到 /foo
-				if engine.RedirectFixedPath && redirectFixedPath(c, root, engine.RedirectFixedPath) {
-					return
-				}
+			// 处理固定路径重定向 例如将 /FOO 重定向到 /foo，或者处理多余斜杠如 //foo 重定向到 /foo
+			if engine.RedirectFixedPath && redirectFixedPath(c, tree.root, engine.RedirectFixedPath) {
+				return
 			}
 		}
 	}
-	// 处理 405 Method Not Allowed
+
+	// 3. 处理 405 Method Not Allowed
 	if engine.HandleMethodNotAllowed {
-		for _, tree := range t.getNotNullMethodTree() {
-			if tree.method == httpMethod {
-				continue
-			}
-			if value := tree.root.getValue(rPath, nil, c.skippedNodes, unescape); value.handlers != nil {
-				c.handlers = engine.allNoMethod
-				serveError(c, http.StatusMethodNotAllowed, default405Body)
-				return
-			}
+		if allowed := engine.allowedMethods(c, rPath, httpMethod, unescape); len(allowed) > 0 {
+			// RFC 9110 §15.5.6：405 响应必须带 Allow 头
+			c.writermem.Header().Set("Allow", strings.Join(allowed, ", "))
+			c.handlers = engine.allNoMethod
+			serveError(c, http.StatusMethodNotAllowed, default405Body)
+			return
 		}
 	}
 	c.handlers = engine.allNoRoute
 	serveError(c, http.StatusNotFound, default404Body)
+}
+
+// allowedMethods 返回该路径上注册过的其它 HTTP 方法，结果为空表示路径本身不存在，应当走 404
+func (engine *Engine) allowedMethods(c *context, rPath, httpMethod string, unescape bool) []string {
+	var allowed []string
+	for _, tree := range engine.trees.getNotNullMethodTree() {
+		if tree.method == httpMethod {
+			continue
+		}
+		// skippedNodes 是回溯缓冲区，残留上一棵树的节点会让本次查找回溯到别的树上，
+		// 导致把没注册的方法误判为允许，每次查找前必须清空
+		*c.skippedNodes = (*c.skippedNodes)[:0]
+		if value := tree.getValue(rPath, nil, c.skippedNodes, unescape); value.handlers != nil {
+			allowed = append(allowed, tree.method)
+		}
+	}
+	// 自定义方法存放在 map 中，遍历顺序随机；排序后 Allow 头的输出稳定
+	slices.Sort(allowed)
+	return allowed
 }
 
 var mimePlain = []string{MIMEPlain}
@@ -731,24 +741,24 @@ func redirectRequest(c *context) {
 	c.writermem.WriteHeaderNow()
 }
 
+// DefaultHTTPErrorHandler 是 *WithError 系列路由的默认错误处理器。
+// *Error（可被 errors.Is/As 解包得到）视为请求参数错误返回 400，其它错误统一返回 500 且不暴露细节。
 func (engine *Engine) DefaultHTTPErrorHandler(err error, c Context) {
-	var statusCode int
-	var response any
-
-	switch err.(type) {
-	case *Error:
-		statusCode = http.StatusBadRequest
-		response = map[string]any{
-			"error":   "Invalid request parameters",
-			"details": err.(*Error).JSON(),
-		}
-	default:
-		// 处理私有错误或其他错误（不暴露详细信息）
-		statusCode = http.StatusInternalServerError
-		response = map[string]any{
-			"error": "Internal server error",
-		}
+	if c.Response().Written() {
+		// 响应已经写出，无法再修改状态码，只记录错误
+		_ = c.Error(err)
+		c.Abort()
+		return
 	}
 
-	c.AbortWithStatusJSON(statusCode, response)
+	if e, ok := asError(err); ok {
+		c.AbortWithStatusJSON(http.StatusBadRequest, H{
+			"error":   "Invalid request parameters",
+			"details": e.JSON(),
+		})
+		return
+	}
+	c.AbortWithStatusJSON(http.StatusInternalServerError, H{
+		"error": "Internal server error",
+	})
 }

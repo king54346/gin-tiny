@@ -5,19 +5,14 @@
 package ginTiny
 
 import (
-	"bytes"
-	"gin-tiny/internal/bytesconv"
 	"net/http"
 	"net/url"
+	"slices"
 	"strings"
 	"unicode"
 	"unicode/utf8"
-)
 
-var (
-	strColon = []byte(":")
-	strStar  = []byte("*")
-	strSlash = []byte("/")
+	"github.com/king54346/gin-tiny/internal/bytesconv"
 )
 
 // Param 是一个URL参数，包含一个key和一个value，key代表参数名，value代表参数值
@@ -51,139 +46,99 @@ func (ps Params) ByName(name string) (va string) {
 }
 
 func (ps Params) Copy() Params {
-	if ps == nil {
-		return nil
-	}
-	c := make(Params, len(ps))
-	copy(c, ps)
-	return c
+	return slices.Clone(ps)
 }
 
-// http的请求方法Get，Post等
+// methodTree 是某个 HTTP 方法的路由表：radix 树是唯一的数据源，static 是它的精确匹配索引。
+//
+// 不含 :param / *catchAll 的路由在插入树之后，会再以完整路径为 key 写入 static。
+// 静态路由命中的充要条件就是路径完全相等，而树对同一路径本就优先匹配静态节点，
+// 所以先查 static 再查树，结果与只查树完全一致，只是省去了逐层比较前缀的开销。
+// 冲突检测、通配符校验、尾斜杠/大小写重定向、405 都仍由树负责，调用方无需感知索引的存在。
 type methodTree struct {
 	method string
-	root   *node // 先通过 methodTrees.get方法获取对应的路由树，在通过addRoute方法添加到路由树中
+	root   *node
+	static map[string]HandlersChain
 }
 
-type supportMethodsHandlers struct {
-	handers          HandlersChain // 支持的HTTP方法对应的处理程序链
-	supportedMethods uint16
+func newMethodTree(method string) *methodTree {
+	root := &node{fullPath: "/"}
+	return &methodTree{method: method, root: root, static: make(map[string]HandlersChain)}
 }
 
+// addRoute 先插入树，重复注册或非法路径会在这里 panic，索引就不会被写脏
+func (t *methodTree) addRoute(path string, handlers HandlersChain) {
+	t.root.addRoute(path, handlers)
+	if isStaticPath(path) {
+		t.static[path] = handlers
+	}
+}
+
+// getValue 先查静态索引（O(1)），未命中再走 radix 树
+func (t *methodTree) getValue(path string, params *Params, skippedNodes *[]skippedNode, unescape bool) nodeValue {
+	if handlers, ok := t.static[path]; ok {
+		return nodeValue{handlers: handlers, fullPath: path}
+	}
+	return t.root.getValue(path, params, skippedNodes, unescape)
+}
+
+// isStaticPath 判断路径是否不含 :param 与 *catchAll
+func isStaticPath(path string) bool {
+	return !strings.ContainsAny(path, ":*")
+}
+
+// methodTrees 标准方法按 methodIndex 下标放在数组里（O(1)，无 map 开销），自定义方法放在 map 中
 type methodTrees struct {
-	connect      *methodTree
-	delete       *methodTree
-	get          *methodTree
-	head         *methodTree
-	options      *methodTree
-	patch        *methodTree
-	post         *methodTree
-	put          *methodTree
-	trace        *methodTree
-	anyOther     map[string]*methodTree            // 存储其他HTTP方法的路由树
-	allowHeader  string                            // 用于存储允许的请求头
-	staticRouter map[string]supportMethodsHandlers // 存储静态路由或多个http方法的处理程序
+	std      [len(standardMethods)]*methodTree
+	anyOther map[string]*methodTree // 存储其他HTTP方法的路由树
 }
 
-// HTTP方法位掩码常量
-const (
-	MethodConnect = 1 << iota
-	MethodDelete
-	MethodGet
-	MethodHead
-	MethodOptions
-	MethodPatch
-	MethodPost
-	MethodPut
-	MethodTrace
-)
-
-// 方法映射（单一数据源，使用数组保证顺序）
-var methodMappings = [...]struct {
-	name    string
-	bitmask uint16
-}{
-	{http.MethodConnect, MethodConnect},
-	{http.MethodDelete, MethodDelete},
-	{http.MethodGet, MethodGet},
-	{http.MethodHead, MethodHead},
-	{http.MethodOptions, MethodOptions},
-	{http.MethodPatch, MethodPatch},
-	{http.MethodPost, MethodPost},
-	{http.MethodPut, MethodPut},
-	{http.MethodTrace, MethodTrace},
+// standardMethods 标准 HTTP 方法，下标与 methodIndex 的返回值一一对应
+var standardMethods = [...]string{
+	http.MethodConnect,
+	http.MethodDelete,
+	http.MethodGet,
+	http.MethodHead,
+	http.MethodOptions,
+	http.MethodPatch,
+	http.MethodPost,
+	http.MethodPut,
+	http.MethodTrace,
 }
 
-// 自动生成的映射和切片
-var (
-	methodToBitmask = func() map[string]uint16 {
-		m := make(map[string]uint16, len(methodMappings))
-		for _, mapping := range methodMappings {
-			m[mapping.name] = mapping.bitmask
-		}
-		return m
-	}()
+// anyMethods 是 Any / StaticRouter 注册的全部方法
+var anyMethods = standardMethods[:]
 
-	anyMethods = func() []string {
-		methods := make([]string, len(methodMappings))
-		for i, mapping := range methodMappings {
-			methods[i] = mapping.name
-		}
-		return methods
-	}()
-)
-
-// IsMethodSupported 检查给定的HTTP方法是否被支持
-func (smh *supportMethodsHandlers) IsMethodSupported(method string) bool {
-	// 首先检查标准方法（位运算，最快）
-	if bitmask, isStandard := methodToBitmask[method]; isStandard {
-		return smh.supportedMethods&bitmask != 0
+// methodIndex 返回标准方法在 standardMethods 中的下标，非标准方法返回 -1
+// 使用 switch 而不是 map，编译器会生成跳转表，避免哈希计算
+func methodIndex(method string) int {
+	switch method {
+	case http.MethodConnect:
+		return 0
+	case http.MethodDelete:
+		return 1
+	case http.MethodGet:
+		return 2
+	case http.MethodHead:
+		return 3
+	case http.MethodOptions:
+		return 4
+	case http.MethodPatch:
+		return 5
+	case http.MethodPost:
+		return 6
+	case http.MethodPut:
+		return 7
+	case http.MethodTrace:
+		return 8
 	}
-	return false
-}
-
-// findHanders 在muchOrStaticRouter中查找指定路径和方法的处理程序链
-func (trees *methodTrees) findHandlers(path, method string) (HandlersChain, bool) {
-	// 1. 检查路径
-	pathHandlers, pathExists := trees.staticRouter[path]
-	if !pathExists {
-		return nil, false // 404
-	}
-
-	// 2. 检查方法
-	if !pathHandlers.IsMethodSupported(method) {
-		return nil, false // 405
-	}
-
-	return pathHandlers.handers, true
-}
-
-func (trees *methodTrees) addStaticRouter(method string, path string, handlers HandlersChain) {
-	if trees.staticRouter == nil {
-		trees.staticRouter = make(map[string]supportMethodsHandlers)
-	}
-
-	// 检查路径是否已存在
-	if pathHandlers, exists := trees.staticRouter[path]; exists {
-		// 如果路径已存在，更新处理程序和支持的方法
-		pathHandlers.handers = handlers
-		pathHandlers.supportedMethods |= methodToBitmask[method]
-		trees.staticRouter[path] = pathHandlers
-	} else {
-		// 如果路径不存在，创建新的条目
-		trees.staticRouter[path] = supportMethodsHandlers{
-			handers:          handlers,
-			supportedMethods: methodToBitmask[method],
-		}
-	}
+	return -1
 }
 
 func newMethodTrees() *methodTrees {
-	trees := &methodTrees{
+	return &methodTrees{
 		anyOther: make(map[string]*methodTree),
 	}
-
-	return trees
 }
 
 // getNotNullMethodTree 返回一个包含所有非空方法树的切片
@@ -192,132 +147,50 @@ func (trees *methodTrees) getNotNullMethodTree() []*methodTree {
 		return nil
 	}
 
-	// 预分配足够的容量以避免多次扩容
-	t := make([]*methodTree, 0, 9+len(trees.anyOther))
-
-	// 使用标准HTTP方法的数组来简化代码
-	standardMethods := [...]*methodTree{
-		trees.connect,
-		trees.delete,
-		trees.get,
-		trees.head,
-		trees.options,
-		trees.patch,
-		trees.post,
-		trees.put,
-		trees.trace,
-	}
-
-	// 添加所有非nil的标准HTTP方法
-	for _, tree := range standardMethods {
+	t := make([]*methodTree, 0, len(trees.std)+len(trees.anyOther))
+	for _, tree := range trees.std {
 		if tree != nil {
 			t = append(t, tree)
 		}
 	}
-
-	// 添加所有自定义HTTP方法
 	for _, tree := range trees.anyOther {
 		t = append(t, tree)
 	}
-	//// staticRouter中的路由方法
-	//for _, pathHandlers := range trees.staticRouter {
-	//	if pathHandlers.handers != nil {
-	//		t = append(t, &methodTree{
-	//			method: pathHandlers.handers,
-	//			root:   nil, // 静态路由没有对应的node树
-	//		})
-	//	}
-	//}
-
 	return t
 }
 
-func (trees *methodTrees) initMethodTree(tree methodTree) {
-	switch tree.method {
-	case http.MethodConnect:
-		trees.connect = &tree
-	case http.MethodDelete:
-		trees.delete = &tree
-	case http.MethodGet:
-		trees.get = &tree
-	case http.MethodHead:
-		trees.head = &tree
-	case http.MethodOptions:
-		trees.options = &tree
-	case http.MethodPatch:
-		trees.patch = &tree
-	case http.MethodPost:
-		trees.post = &tree
-	case http.MethodPut:
-		trees.put = &tree
-	case http.MethodTrace:
-		trees.trace = &tree
-	default:
-		if _, ok := trees.anyOther[tree.method]; !ok {
-			trees.anyOther[tree.method] = &tree
-		}
-	}
-}
-
-// 获取指定方法的路由树
-func (trees *methodTrees) getMethodTree(method string) *node {
+// getTree 获取指定方法的路由表，不存在返回 nil
+func (trees *methodTrees) getTree(method string) *methodTree {
 	if trees == nil {
 		return nil
 	}
+	if i := methodIndex(method); i >= 0 {
+		return trees.std[i]
+	}
+	return trees.anyOther[method]
+}
 
-	switch method {
-	case http.MethodConnect:
-		if trees.connect != nil {
-			return trees.connect.root
-		}
-	case http.MethodDelete:
-		if trees.delete != nil {
-			return trees.delete.root
-		}
-	case http.MethodGet:
-		if trees.get != nil {
-			return trees.get.root
-		}
-	case http.MethodHead:
-		if trees.head != nil {
-			return trees.head.root
-		}
-	case http.MethodOptions:
-		if trees.options != nil {
-			return trees.options.root
-		}
-	case http.MethodPatch:
-		if trees.patch != nil {
-			return trees.patch.root
-		}
-	case http.MethodPost:
-		if trees.post != nil {
-			return trees.post.root
-		}
-	case http.MethodPut:
-		if trees.put != nil {
-			return trees.put.root
-		}
-	case http.MethodTrace:
-		if trees.trace != nil {
-			return trees.trace.root
-		}
-	default:
-		if tree, ok := trees.anyOther[method]; ok {
-			return tree.root
-		}
+// getOrCreateTree 获取指定方法的路由表，不存在时创建
+func (trees *methodTrees) getOrCreateTree(method string) *methodTree {
+	if tree := trees.getTree(method); tree != nil {
+		return tree
+	}
+	tree := newMethodTree(method)
+	if i := methodIndex(method); i >= 0 {
+		trees.std[i] = tree
+	} else {
+		trees.anyOther[method] = tree
+	}
+	return tree
+}
+
+// getMethodTree 获取指定方法的路由树根节点
+func (trees *methodTrees) getMethodTree(method string) *node {
+	if tree := trees.getTree(method); tree != nil {
+		return tree.root
 	}
 	return nil
 }
-
-//func (trees methodTrees) get(method string) *node {
-//	for _, tree := range trees {
-//		if tree.method == method {
-//			return tree.root
-//		}
-//	}
-//	return nil
-//}
 
 func longestCommonPrefix(a, b string) int {
 	i := 0
@@ -339,17 +212,13 @@ func (n *node) addChild(child *node) {
 }
 
 // 统计path中的参数个数
+// strings.Count 对单字节子串走的就是 bytealg 快速路径，无需 unsafe 转换
 func countParams(path string) uint16 {
-	var n uint16
-	s := bytesconv.StringToBytes(path)
-	n += uint16(bytes.Count(s, strColon))
-	n += uint16(bytes.Count(s, strStar))
-	return n
+	return uint16(strings.Count(path, ":") + strings.Count(path, "*"))
 }
 
 func countSections(path string) uint16 {
-	s := bytesconv.StringToBytes(path)
-	return uint16(bytes.Count(s, strSlash))
+	return uint16(strings.Count(path, "/"))
 }
 
 type nodeType uint8
@@ -671,10 +540,44 @@ type skippedNode struct {
 // 优化版本：减少内存分配，提高性能
 func (n *node) getValue(path string, params *Params, skippedNodes *[]skippedNode, unescape bool) (value nodeValue) {
 	var globalParamsCount int16
+	// backtracked 表示当前节点是从 skippedNodes 回溯恢复的：它的静态子节点已经试过且失败，
+	// 这一轮只能走通配符子节点，否则会再次进入同一个静态分支，形成死循环。
+	// （旧实现保存的是一份不含 indices 的节点副本来达到同样效果，每个回溯点都要堆分配）
+	backtracked := false
+	// tsrCandidate 记录回溯之前某个失败分支给出的尾斜杠重定向建议：
+	// 优先尝试回溯找到真正的匹配，全部失败时才采用重定向建议
+	tsrCandidate := false
+	defer func() {
+		if value.handlers == nil && tsrCandidate {
+			value.tsr = true
+		}
+	}()
+
+	// backtrack 弹出最近一个能接上当前剩余路径的回溯点并恢复现场，成功返回 true。
+	// 回溯点在「经过有通配符兄弟的静态子节点」时压入，恢复后只走通配符子节点
+	backtrack := func() bool {
+		for length := len(*skippedNodes); length > 0; length-- {
+			skipped := (*skippedNodes)[length-1]
+			*skippedNodes = (*skippedNodes)[:length-1]
+			if strings.HasSuffix(skipped.path, path) {
+				path = skipped.path
+				n = skipped.node
+				backtracked = true
+				if value.params != nil {
+					*value.params = (*value.params)[:skipped.paramsCount]
+				}
+				globalParamsCount = skipped.paramsCount
+				return true
+			}
+		}
+		return false
+	}
 
 walk:
 	for {
 		prefix := n.path
+		skipStatic := backtracked
+		backtracked = false
 
 		// 情况1：待匹配路径长于当前节点路径
 		if len(path) > len(prefix) {
@@ -686,26 +589,18 @@ walk:
 				// 获取下一个字符用于匹配
 				idxc := path[0]
 
-				// 遍历子节点索引
-				for i := 0; i < len(n.indices); i++ {
-					if n.indices[i] == idxc {
+				// 遍历子节点索引（回溯恢复的节点跳过静态子节点）
+				for i := range len(n.indices) {
+					if !skipStatic && n.indices[i] == idxc {
 						// 如果有通配符子节点，保存当前状态
 						if n.wildChild {
-							index := len(*skippedNodes)
-							*skippedNodes = (*skippedNodes)[:index+1]
-							(*skippedNodes)[index] = skippedNode{
-								path: prefix + path,
-								node: &node{
-									path:      n.path,
-									wildChild: n.wildChild,
-									nType:     n.nType,
-									priority:  n.priority,
-									children:  n.children,
-									handlers:  n.handlers,
-									fullPath:  n.fullPath,
-								},
+							// 查找期间树是只读的，直接保存节点指针即可，无需每个回溯点复制一份 node；
+							// 用 append 的原因同 param 分支（容量来自创建 context 时的 maxSections）
+							*skippedNodes = append(*skippedNodes, skippedNode{
+								path:        prefix + path,
+								node:        n,
 								paramsCount: globalParamsCount,
-							}
+							})
 						}
 						// 继续遍历匹配的子节点
 						n = n.children[i]
@@ -716,20 +611,8 @@ walk:
 				// 没有通配符子节点
 				if !n.wildChild {
 					// 尝试回退到之前跳过的节点
-					if path != "/" {
-						for length := len(*skippedNodes); length > 0; length-- {
-							skipped := (*skippedNodes)[length-1]
-							*skippedNodes = (*skippedNodes)[:length-1]
-							if strings.HasSuffix(skipped.path, path) {
-								path = skipped.path
-								n = skipped.node
-								if value.params != nil {
-									*value.params = (*value.params)[:skipped.paramsCount]
-								}
-								globalParamsCount = skipped.paramsCount
-								continue walk
-							}
-						}
+					if path != "/" && backtrack() {
+						continue walk
 					}
 
 					// 检查尾部斜杠重定向
@@ -750,23 +633,22 @@ walk:
 						end++
 					}
 
-					// 保存参数值
-					if params != nil && cap(*params) > 0 {
+					// 保存参数值。用 append 而不是按预分配容量重新切片：服务启动后再注册参数更多的路由时，
+					// 池中复用的旧 context 容量不足，重新切片会越界，旧的 cap > 0 判断则会静默丢掉参数
+					if params != nil {
 						if value.params == nil {
 							value.params = params
 						}
-						i := len(*value.params)
-						*value.params = (*value.params)[:i+1]
 						val := path[:end]
 						if unescape {
 							if v, err := url.QueryUnescape(val); err == nil {
 								val = v
 							}
 						}
-						(*value.params)[i] = Param{
+						*value.params = append(*value.params, Param{
 							Key:   n.path[1:],
 							Value: val,
-						}
+						})
 					}
 
 					// 检查是否还有剩余路径
@@ -777,8 +659,13 @@ walk:
 							continue walk
 						}
 
-						// 不能继续，检查尾部斜杠
-						value.tsr = len(path) == end+1
+						// 参数之后还有路径但没有子节点：当前分支失败，先尝试回溯，都失败时再给出尾斜杠建议
+						tsr := len(path) == end+1
+						if backtrack() {
+							tsrCandidate = tsrCandidate || tsr
+							continue walk
+						}
+						value.tsr = tsr
 						return
 					}
 
@@ -788,32 +675,36 @@ walk:
 						return
 					}
 
-					// 检查是否有尾部斜杠的处理程序
+					// 路径已耗尽但参数节点没有 handler（例如只注册了 /x/:p/y）：同样先尝试回溯
+					tsr := false
 					if len(n.children) == 1 {
-						n = n.children[0]
-						value.tsr = (n.path == "/" && n.handlers != nil) ||
-							(n.path == "" && n.indices == "/")
+						child := n.children[0]
+						tsr = (child.path == "/" && child.handlers != nil) ||
+							(child.path == "" && child.indices == "/")
 					}
+					if backtrack() {
+						tsrCandidate = tsrCandidate || tsr
+						continue walk
+					}
+					value.tsr = tsr
 					return
 
 				case catchAll:
-					// 保存catch-all参数
+					// 保存catch-all参数（用 append 的原因同 param 分支）
 					if params != nil {
 						if value.params == nil {
 							value.params = params
 						}
-						i := len(*value.params)
-						*value.params = (*value.params)[:i+1]
 						val := path
 						if unescape {
 							if v, err := url.QueryUnescape(path); err == nil {
 								val = v
 							}
 						}
-						(*value.params)[i] = Param{
+						*value.params = append(*value.params, Param{
 							Key:   n.path[2:],
 							Value: val,
-						}
+						})
 					}
 
 					value.handlers = n.handlers
@@ -829,20 +720,8 @@ walk:
 		// 情况2：路径完全匹配当前节点
 		if path == prefix {
 			// 如果没有处理程序且不是根路径，尝试回退
-			if n.handlers == nil && path != "/" {
-				for length := len(*skippedNodes); length > 0; length-- {
-					skipped := (*skippedNodes)[length-1]
-					*skippedNodes = (*skippedNodes)[:length-1]
-					if strings.HasSuffix(skipped.path, path) {
-						path = skipped.path
-						n = skipped.node
-						if value.params != nil {
-							*value.params = (*value.params)[:skipped.paramsCount]
-						}
-						globalParamsCount = skipped.paramsCount
-						continue walk
-					}
-				}
+			if n.handlers == nil && path != "/" && backtrack() {
+				continue walk
 			}
 
 			// 检查是否有处理程序
@@ -863,7 +742,7 @@ walk:
 			}
 
 			// 检查子节点中的斜杠
-			for i := 0; i < len(n.indices); i++ {
+			for i := range len(n.indices) {
 				if n.indices[i] == '/' {
 					n = n.children[i]
 					value.tsr = (len(n.path) == 1 && n.handlers != nil) ||
@@ -884,20 +763,8 @@ walk:
 				n.handlers != nil)
 
 		// 最后尝试回退
-		if !value.tsr && path != "/" {
-			for length := len(*skippedNodes); length > 0; length-- {
-				skipped := (*skippedNodes)[length-1]
-				*skippedNodes = (*skippedNodes)[:length-1]
-				if strings.HasSuffix(skipped.path, path) {
-					path = skipped.path
-					n = skipped.node
-					if value.params != nil {
-						*value.params = (*value.params)[:skipped.paramsCount]
-					}
-					globalParamsCount = skipped.paramsCount
-					continue walk
-				}
-			}
+		if !value.tsr && path != "/" && backtrack() {
+			continue walk
 		}
 
 		return
@@ -958,7 +825,7 @@ walk:
 
 			// 尝试修复尾部斜杠
 			if fixTrailingSlash {
-				for i := 0; i < len(n.indices); i++ {
+				for i := range len(n.indices) {
 					if n.indices[i] == '/' {
 						n = n.children[i]
 						if (len(n.path) == 1 && n.handlers != nil) ||
@@ -972,14 +839,18 @@ walk:
 			return nil
 		}
 
-		if !n.wildChild {
+		// 静态子节点和通配符子节点可以是兄弟（如 /users/new 与 /users/:id），
+		// addChild 保证通配符子节点总在最后、且不出现在 indices 中。
+		// 先按静态子节点查找，找不到再回退到通配符子节点
+		rbBeforeStatic := rb
+		{
 			// 处理已处理的rune字节
 			rb = shiftNRuneBytes(rb, npLen)
 
 			if rb[0] != 0 {
 				// 继续处理未完成的rune
 				idxc := rb[0]
-				for i := 0; i < len(n.indices); i++ {
+				for i := range len(n.indices) {
 					if n.indices[i] == idxc {
 						n = n.children[i]
 						npLen = len(n.path)
@@ -1005,7 +876,7 @@ walk:
 				rb = shiftNRuneBytes(rb, off)
 
 				idxc := rb[0]
-				for i := 0; i < len(n.indices); i++ {
+				for i := range len(n.indices) {
 					if n.indices[i] == idxc {
 						// 递归方法处理大小写
 						if out := n.children[i].findCaseInsensitivePathRec(
@@ -1023,7 +894,7 @@ walk:
 					rb = shiftNRuneBytes(rb, off)
 
 					idxc := rb[0]
-					for i := 0; i < len(n.indices); i++ {
+					for i := range len(n.indices) {
 						if n.indices[i] == idxc {
 							n = n.children[i]
 							npLen = len(n.path)
@@ -1033,14 +904,18 @@ walk:
 				}
 			}
 
-			// 未找到匹配
-			if fixTrailingSlash && path == "/" && n.handlers != nil {
-				return ciPath
+			if !n.wildChild {
+				// 未找到匹配
+				if fixTrailingSlash && path == "/" && n.handlers != nil {
+					return ciPath
+				}
+				return nil
 			}
-			return nil
 		}
 
-		n = n.children[0]
+		// 静态子节点都没匹配上，回退到通配符子节点；通配符分支不消费 rune 缓冲，恢复进入前的状态
+		rb = rbBeforeStatic
+		n = n.children[len(n.children)-1]
 		switch n.nType {
 		case param:
 			// 查找参数结束位置

@@ -105,10 +105,9 @@ func TestResponseWriterHijack(t *testing.T) {
 	writer.reset(testWriter)
 	w := ResponseWriter(writer)
 
-	assert.Panics(t, func() {
-		_, _, err := w.Hijack()
-		assert.NoError(t, err)
-	})
+	// 底层 writer 不支持 Hijack 时返回 http.ErrNotSupported 而不是 panic
+	_, _, err := w.Hijack()
+	assert.ErrorIs(t, err, http.ErrNotSupported)
 	assert.True(t, w.Written())
 
 	w.Flush()

@@ -6,17 +6,13 @@ package ginTiny
 
 import (
 	"fmt"
-	"runtime"
-	"strconv"
 	"strings"
 )
-
-const ginSupportMinGoVer = 18
 
 // IsDebugging returns true if the framework is running in debug mode.
 // Use SetMode(gin.ReleaseMode) to disable debug mode.
 func IsDebugging() bool {
-	return ginMode == debugCode
+	return ginMode.Load() == debugCode
 }
 
 // DebugPrintRouteFunc indicates debug log output format.
@@ -43,23 +39,8 @@ func debugPrint(format string, values ...any) {
 	}
 }
 
-func getMinVer(v string) (uint64, error) {
-	first := strings.IndexByte(v, '.')
-	last := strings.LastIndexByte(v, '.')
-	if first == last {
-		return strconv.ParseUint(v[first+1:], 10, 64)
-	}
-	return strconv.ParseUint(v[first+1:last], 10, 64)
-}
-
 func debugPrintWARNINGDefault() {
-	if v, e := getMinVer(runtime.Version()); e == nil && v < ginSupportMinGoVer {
-		debugPrint(`[WARNING] Now Gin requires Go 1.18+.
-
-`)
-	}
 	debugPrint(`[WARNING] Creating an Engine instance with the Logger and Recovery middleware already attached.
-
 `)
 }
 

@@ -137,3 +137,18 @@ func TestBasicAuth401WithCustomRealm(t *testing.T) {
 	assert.Equal(t, http.StatusUnauthorized, w.Code)
 	assert.Equal(t, "Basic realm=\"My Custom \\\"Realm\\\"\"", w.Header().Get("WWW-Authenticate"))
 }
+
+// RFC 7617：方案名不区分大小写，凭据前后的多余空白不影响认证
+func TestBasicAuthSchemeCaseInsensitive(t *testing.T) {
+	pairs := processAccounts(Accounts{"admin": "secret"})
+	creds := authorizationHeader("admin", "secret")[len("Basic "):]
+	for _, h := range []string{"Basic " + creds, "basic " + creds, "BASIC " + creds, "Basic   " + creds, " Basic " + creds + " "} {
+		user, found := pairs.searchCredential(h)
+		assert.True(t, found, "%q", h)
+		assert.Equal(t, "admin", user)
+	}
+	for _, h := range []string{"Bearer " + creds, "Basic", "Basic ", creds, "Basic " + creds + "x"} {
+		_, found := pairs.searchCredential(h)
+		assert.False(t, found, "%q", h)
+	}
+}

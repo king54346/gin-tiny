@@ -8,22 +8,26 @@ import (
 	"bytes"
 	"errors"
 	"fmt"
-	"gin-tiny/binding"
-	testdata "gin-tiny/testdata/protoexample"
-	"github.com/gin-contrib/sse"
-	"github.com/stretchr/testify/assert"
 	"mime/multipart"
 	"net"
 	"net/http"
 	"net/http/httptest"
 	"net/url"
+	"path/filepath"
 	"reflect"
 	"strings"
 	"sync"
 	"testing"
 	"time"
+
+	"github.com/king54346/gin-tiny/binding"
+	"github.com/king54346/gin-tiny/render"
+	testdata "github.com/king54346/gin-tiny/testdata/protoexample"
+	"github.com/stretchr/testify/assert"
+
 	//别名 context为 ctx
 	ctx "context"
+
 	"google.golang.org/protobuf/proto"
 )
 
@@ -84,7 +88,7 @@ func TestContextFormFile(t *testing.T) {
 		assert.Equal(t, "test", f.Filename)
 	}
 
-	assert.NoError(t, c.SaveUploadedFile(f, "test"))
+	assert.NoError(t, c.SaveUploadedFile(f, filepath.Join(t.TempDir(), "test")))
 }
 
 func TestContextMultipartForm(t *testing.T) {
@@ -105,7 +109,7 @@ func TestContextMultipartForm(t *testing.T) {
 		assert.NotNil(t, f)
 	}
 
-	assert.NoError(t, c.SaveUploadedFile(f.File["file"][0], "test"))
+	assert.NoError(t, c.SaveUploadedFile(f.File["file"][0], filepath.Join(t.TempDir(), "test")))
 }
 
 func TestSaveUploadedOpenFailed(t *testing.T) {
@@ -120,7 +124,7 @@ func TestSaveUploadedOpenFailed(t *testing.T) {
 	f := &multipart.FileHeader{
 		Filename: "file",
 	}
-	assert.Error(t, c.SaveUploadedFile(f, "test"))
+	assert.Error(t, c.SaveUploadedFile(f, filepath.Join(t.TempDir(), "test")))
 }
 
 func TestSaveUploadedCreateFailed(t *testing.T) {
@@ -322,12 +326,20 @@ func TestContextCopy(t *testing.T) {
 	c.params = &Params{Param{Key: "foo", Value: "bar"}}
 	c.Set("foo", "bar")
 	c.fullPath = "/hola"
-	cp := c.Copy()
+	cp := c.Copy().(*context)
 	assert.Nil(t, cp.handlers)
 	//assert.Nil(t, cp.writermem.ResponseWriter)
 	assert.Equal(t, cp.writermem, cp.Response().(*responseWriter))
-	assert.Equal(t, cp.request, c.request)
-	assert.Equal(t, cp.index, abortIndex)
+	// 副本持有换了 context（WithoutCancel）的请求浅拷贝，其余字段一致
+	assert.NotSame(t, c.request, cp.request)
+	assert.Equal(t, c.request.Method, cp.request.Method)
+	assert.Same(t, c.request.URL, cp.request.URL)
+	// 副本初始未中止；它没有处理链，调用 Next() 不会执行任何 handler
+	assert.False(t, cp.IsAborted())
+	cp.Next()
+	cp.Abort()
+	assert.True(t, cp.IsAborted())
+	assert.False(t, c.IsAborted(), "对副本调用 Abort 不影响原 context")
 	assert.Equal(t, cp.Keys, c.Keys)
 	assert.Equal(t, cp.engine, c.engine)
 	assert.Equal(t, cp.Params(), c.Params())
@@ -339,7 +351,7 @@ func TestContextHandlerName(t *testing.T) {
 	c, _ := CreateTestContext(httptest.NewRecorder())
 	c.handlers = HandlersChain{func(c Context) {}, handlerNameTest}
 
-	assert.Regexp(t, "^(.*/vendor/)?gin-tiny.handlerNameTest$", c.HandlerName())
+	assert.Regexp(t, "^(.*/vendor/)?github.com/king54346/gin-tiny.handlerNameTest$", c.HandlerName())
 }
 
 func TestContextHandlerNames(t *testing.T) {
@@ -350,7 +362,7 @@ func TestContextHandlerNames(t *testing.T) {
 
 	assert.True(t, len(names) == 4)
 	for _, name := range names {
-		assert.Regexp(t, `^(.*/vendor/)?(gin-tiny\.){1}(TestContextHandlerNames\.func.*){0,1}(handlerNameTest.*){0,1}`, name)
+		assert.Regexp(t, `^(.*/vendor/)?(github.com/king54346/gin-tiny\.){1}(TestContextHandlerNames\.func.*){0,1}(handlerNameTest.*){0,1}`, name)
 	}
 }
 
@@ -921,8 +933,8 @@ func TestContextRenderSSE(t *testing.T) {
 	c, _ := CreateTestContext(w)
 
 	c.SSEvent("float", 1.5)
-	c.Render(-1, sse.Event{
-		Id:   "123",
+	c.Render(-1, render.SSEvent{
+		ID:   "123",
 		Data: "text",
 	})
 	c.SSEvent("chat", H{
@@ -2090,151 +2102,127 @@ func TestRemoteIPFail(t *testing.T) {
 	c, _ := CreateTestContext(httptest.NewRecorder())
 	c.request, _ = http.NewRequest("POST", "/", nil)
 	c.request.RemoteAddr = "[:::]:80"
-	ip := net.ParseIP(c.RemoteIP())
+	ip, err := parseAddr(c.RemoteIP())
 	trust := c.engine.isTrustedProxy(ip)
-	assert.Nil(t, ip)
+	assert.Error(t, err)
 	assert.False(t, trust)
 }
 
-func TestHasRequestContext(t *testing.T) {
-	c, _ := CreateTestContext(httptest.NewRecorder())
-	assert.False(t, c.hasRequestContext(), "no request, no fallback")
-	c.engine.ContextWithFallback = true
-	assert.False(t, c.hasRequestContext(), "no request, has fallback")
-	c.request, _ = http.NewRequest(http.MethodGet, "/", nil)
-	assert.True(t, c.hasRequestContext(), "has request, has fallback")
-	c.request, _ = http.NewRequestWithContext(nil, "", "", nil) //nolint:staticcheck
-	assert.False(t, c.hasRequestContext(), "has request with nil ctx, has fallback")
-	c.engine.ContextWithFallback = false
-	assert.False(t, c.hasRequestContext(), "has request, no fallback")
-
-	c = &context{}
-	assert.False(t, c.hasRequestContext(), "no request, no engine")
-	c.request, _ = http.NewRequest(http.MethodGet, "/", nil)
-	assert.False(t, c.hasRequestContext(), "has request, no engine")
-}
-
-func TestContextWithFallbackDeadlineFromRequestContext(t *testing.T) {
-	c, _ := CreateTestContext(httptest.NewRecorder())
-	// enable ContextWithFallback feature flag
-	c.engine.ContextWithFallback = true
-
+// 没有请求时视为永不取消的空 context
+func TestContextWithoutRequest(t *testing.T) {
+	c := &context{}
 	deadline, ok := c.Deadline()
 	assert.Zero(t, deadline)
 	assert.False(t, ok)
+	assert.Nil(t, c.Done())
+	assert.NoError(t, c.Err())
+	assert.Nil(t, c.Value("missing"))
+}
 
-	c2, _ := CreateTestContext(httptest.NewRecorder())
-	// enable ContextWithFallback feature flag
-	c2.engine.ContextWithFallback = true
-
-	c2.request, _ = http.NewRequest(http.MethodGet, "/", nil)
+// 默认配置下（无需任何开关）Deadline/Done/Err 就基于 Request().Context()
+func TestContextDeadlineFromRequestContext(t *testing.T) {
+	c, _ := CreateTestContext(httptest.NewRecorder())
+	c.request, _ = http.NewRequest(http.MethodGet, "/", nil)
 	d := time.Now().Add(time.Second)
-	ctx, cancel := ctx.WithDeadline(ctx.Background(), d)
+	reqCtx, cancel := ctx.WithDeadline(ctx.Background(), d)
 	defer cancel()
-	c2.request = c2.request.WithContext(ctx)
-	deadline, ok = c2.Deadline()
+	c.request = c.request.WithContext(reqCtx)
+
+	deadline, ok := c.Deadline()
 	assert.Equal(t, d, deadline)
 	assert.True(t, ok)
 }
 
-func TestContextWithFallbackDoneFromRequestContext(t *testing.T) {
+func TestContextDoneAndErrFromRequestContext(t *testing.T) {
 	c, _ := CreateTestContext(httptest.NewRecorder())
-	// enable ContextWithFallback feature flag
-	c.engine.ContextWithFallback = true
+	reqCtx, cancel := ctx.WithCancel(ctx.Background())
+	c.request, _ = http.NewRequestWithContext(reqCtx, http.MethodGet, "/", nil)
 
-	assert.Nil(t, c.Done())
-
-	c2, _ := CreateTestContext(httptest.NewRecorder())
-	// enable ContextWithFallback feature flag
-	c2.engine.ContextWithFallback = true
-
-	c2.request, _ = http.NewRequest(http.MethodGet, "/", nil)
-	ctx, cancel := ctx.WithCancel(ctx.Background())
-	c2.request = c2.request.WithContext(ctx)
-	cancel()
-	assert.NotNil(t, <-c2.Done())
-}
-
-func TestContextWithFallbackErrFromRequestContext(t *testing.T) {
-	c, _ := CreateTestContext(httptest.NewRecorder())
-	// enable ContextWithFallback feature flag
-	c.engine.ContextWithFallback = true
-
-	assert.Nil(t, c.Err())
-
-	c2, _ := CreateTestContext(httptest.NewRecorder())
-	// enable ContextWithFallback feature flag
-	c2.engine.ContextWithFallback = true
-
-	c2.request, _ = http.NewRequest(http.MethodGet, "/", nil)
-	ctx1, cancel := ctx.WithCancel(ctx.Background())
-	c2.request = c2.request.WithContext(ctx1)
-	cancel()
-
-	assert.EqualError(t, c2.Err(), ctx.Canceled.Error())
-}
-
-func TestContextWithFallbackValueFromRequestContext(t *testing.T) {
-	type contextKey string
-
-	tests := []struct {
-		name             string
-		getContextAndKey func() (*context, any)
-		value            any
-	}{
-		{
-			name: "c with struct context key",
-			getContextAndKey: func() (*context, any) {
-				var key struct{}
-				c, _ := CreateTestContext(httptest.NewRecorder())
-				// enable ContextWithFallback feature flag
-				c.engine.ContextWithFallback = true
-				c.request, _ = http.NewRequest("POST", "/", nil)
-				c.request = c.request.WithContext(ctx.WithValue(ctx.TODO(), key, "value"))
-				return c, key
-			},
-			value: "value",
-		},
-		{
-			name: "c with string context key",
-			getContextAndKey: func() (*context, any) {
-				c, _ := CreateTestContext(httptest.NewRecorder())
-				// enable ContextWithFallback feature flag
-				c.engine.ContextWithFallback = true
-				c.request, _ = http.NewRequest("POST", "/", nil)
-				c.request = c.request.WithContext(ctx.WithValue(ctx.TODO(), contextKey("key"), "value"))
-				return c, contextKey("key")
-			},
-			value: "value",
-		},
-		{
-			name: "c with nil http.Request",
-			getContextAndKey: func() (*context, any) {
-				c, _ := CreateTestContext(httptest.NewRecorder())
-				// enable ContextWithFallback feature flag
-				c.engine.ContextWithFallback = true
-				c.request = nil
-				return c, "key"
-			},
-			value: nil,
-		},
-		{
-			name: "c with nil http.Request.context()",
-			getContextAndKey: func() (*context, any) {
-				c, _ := CreateTestContext(httptest.NewRecorder())
-				// enable ContextWithFallback feature flag
-				c.engine.ContextWithFallback = true
-				c.request, _ = http.NewRequest("POST", "/", nil)
-				return c, "key"
-			},
-			value: nil,
-		},
+	assert.NoError(t, c.Err())
+	select {
+	case <-c.Done():
+		t.Fatal("context must not be done before cancel")
+	default:
 	}
-	for _, tt := range tests {
-		t.Run(tt.name, func(t *testing.T) {
-			c, key := tt.getContextAndKey()
-			assert.Equal(t, tt.value, c.Value(key))
-		})
+
+	cancel()
+	select {
+	case <-c.Done():
+	case <-time.After(time.Second):
+		t.Fatal("Done() was not closed after the request context was canceled")
+	}
+	assert.ErrorIs(t, c.Err(), ctx.Canceled)
+}
+
+func TestContextValueFromRequestContext(t *testing.T) {
+	type contextKey string
+	var structKey struct{}
+
+	c, _ := CreateTestContext(httptest.NewRecorder())
+	reqCtx := ctx.WithValue(ctx.Background(), structKey, "struct")
+	reqCtx = ctx.WithValue(reqCtx, contextKey("typed"), "typed")
+	reqCtx = ctx.WithValue(reqCtx, "shadowed", "from request")
+	c.request, _ = http.NewRequestWithContext(reqCtx, http.MethodGet, "/", nil)
+	c.Set("shadowed", "from keys")
+
+	assert.Equal(t, "struct", c.Value(structKey))
+	assert.Equal(t, "typed", c.Value(contextKey("typed")))
+	// string 类型的 key 优先从 Keys 中查找
+	assert.Equal(t, "from keys", c.Value("shadowed"))
+	assert.Nil(t, c.Value("missing"))
+	assert.Equal(t, c.request, c.Value(0))
+	assert.Equal(t, c, c.Value(ContextKey))
+}
+
+// Copy 得到的副本保留请求 context 中的值，但不受原请求取消和截止时间的影响
+func TestContextCopyDetachesCancellation(t *testing.T) {
+	type key struct{}
+	reqCtx, cancel := ctx.WithTimeout(ctx.WithValue(ctx.Background(), key{}, "v"), time.Hour)
+	c, _ := CreateTestContext(httptest.NewRecorder())
+	c.request, _ = http.NewRequestWithContext(reqCtx, http.MethodGet, "/", nil)
+
+	cp := c.Copy()
+	cancel()
+
+	assert.ErrorIs(t, c.Err(), ctx.Canceled)
+	assert.NoError(t, cp.Err())
+	assert.Nil(t, cp.Done())
+	_, hasDeadline := cp.Deadline()
+	assert.False(t, hasDeadline)
+	assert.Equal(t, "v", cp.Value(key{}))
+	// 副本的请求仍是同一个请求的浅拷贝
+	assert.Equal(t, c.request.URL, cp.Request().URL)
+}
+
+// 客户端断开后，handler 里把 c 当作 context.Context 传给下游的调用应当被取消
+func TestContextCanceledWhenClientDisconnects(t *testing.T) {
+	canceled := make(chan error, 1)
+	entered := make(chan struct{})
+	r := New()
+	r.GET("/wait", func(c Context) {
+		close(entered)
+		<-c.Done()
+		canceled <- c.Err()
+	})
+
+	srv := httptest.NewServer(r)
+	defer srv.Close()
+
+	reqCtx, cancel := ctx.WithCancel(ctx.Background())
+	req, _ := http.NewRequestWithContext(reqCtx, http.MethodGet, srv.URL+"/wait", nil)
+	go func() {
+		if resp, err := http.DefaultClient.Do(req); err == nil {
+			resp.Body.Close()
+		}
+	}()
+	<-entered
+	cancel()
+
+	select {
+	case err := <-canceled:
+		assert.ErrorIs(t, err, ctx.Canceled)
+	case <-time.After(5 * time.Second):
+		t.Fatal("handler did not observe client disconnect")
 	}
 }
 
@@ -2366,4 +2354,38 @@ func TestInterceptedHeader(t *testing.T) {
 	// middleware. Assert this
 	assert.Equal(t, "", w.Result().Header.Get("X-Test"))
 	assert.Equal(t, "present", w.Result().Header.Get("X-Test-2"))
+}
+
+func TestContextJSONPBlobEscapesCallback(t *testing.T) {
+	w := httptest.NewRecorder()
+	c, _ := CreateTestContext(w)
+	c.request, _ = http.NewRequest(http.MethodGet, "/", nil)
+
+	assert.NoError(t, c.JSONPBlob(http.StatusOK, "x</script><script>alert(1)//", []byte(`{"a":1}`)))
+	assert.NotContains(t, w.Body.String(), "</script>")
+	assert.True(t, strings.HasSuffix(w.Body.String(), `({"a":1});`))
+}
+
+func TestContextInlineFilename(t *testing.T) {
+	w := httptest.NewRecorder()
+	c, _ := CreateTestContext(w)
+	c.request, _ = http.NewRequest(http.MethodGet, "/", nil)
+
+	assert.NoError(t, c.Inline("./gin.go", `a"b.go`))
+	assert.Equal(t, `inline; filename="a\"b.go"`, w.Header().Get("Content-Disposition"))
+
+	w = httptest.NewRecorder()
+	c, _ = CreateTestContext(w)
+	c.request, _ = http.NewRequest(http.MethodGet, "/", nil)
+	assert.NoError(t, c.Inline("./gin.go", "文件.go"))
+	assert.Equal(t, "inline; filename*=UTF-8''"+url.QueryEscape("文件.go"), w.Header().Get("Content-Disposition"))
+}
+
+func TestContextResetClearsErrors(t *testing.T) {
+	c, _ := CreateTestContext(httptest.NewRecorder())
+	_ = c.Error(errors.New("boom"))
+	backing := c.errors[:1]
+	c.Reset()
+	assert.Empty(t, c.Errors())
+	assert.Nil(t, backing[0], "Reset 后底层数组不应继续持有上个请求的 *Error")
 }

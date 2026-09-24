@@ -3,6 +3,7 @@ package ginTiny
 import (
 	"net/http"
 	"net/url"
+	"path"
 	"strings"
 )
 
@@ -38,41 +39,17 @@ func (c *context) ServeStaticFile(fs http.FileSystem, fileServer http.Handler) {
 		c.index = -1
 		return
 	}
-	f.Close()
+	defer f.Close()
 
+	// 普通文件直接复用已打开的句柄，避免 FileServer 再打开一次；
+	// 目录（index.html、目录列表）、以 / 结尾或名为 index.html 的请求涉及 FileServer 的重定向规则，仍交给它处理
+	if fi, err := f.Stat(); err == nil && fi.Mode().IsRegular() &&
+		!strings.HasSuffix(file, "/") && path.Base(file) != "index.html" {
+		http.ServeContent(c.Response(), c.Request(), fi.Name(), fi.ModTime(), f)
+		return
+	}
 	fileServer.ServeHTTP(c.Response(), c.Request())
 }
-
-//func (c *context) FileFromFS(file string, filesystem fs.FS) error {
-//	return fsFile(c, file, filesystem)
-//}
-//
-//func fsFile(c Context, file string, filesystem fs.FS) error {
-//	f, err := filesystem.Open(file)
-//	if err != nil {
-//		return ErrNotFound
-//	}
-//	defer f.Close()
-//
-//	fi, _ := f.Stat()
-//	if fi.IsDir() {
-//		file = filepath.ToSlash(filepath.Join(file, "index.html")) // ToSlash is necessary for Windows. fs.Open and os.Open are different in that aspect.
-//		f, err = filesystem.Open(file)
-//		if err != nil {
-//			return ErrNotFound
-//		}
-//		defer f.Close()
-//		if fi, err = f.Stat(); err != nil {
-//			return err
-//		}
-//	}
-//	ff, ok := f.(io.ReadSeeker)
-//	if !ok {
-//		return errors.New("file does not implement io.ReadSeeker")
-//	}
-//	http.ServeContent(c.Response(), c.Request(), fi.Name(), fi.ModTime(), ff)
-//	return nil
-//}
 
 var quoteEscaper = strings.NewReplacer("\\", "\\\\", `"`, "\\\"")
 
@@ -83,10 +60,15 @@ func escapeQuotes(s string) string {
 // FileAttachment writes the specified file into the body stream in an efficient way
 // On the client side, the file will typically be downloaded with the given filename
 func (c *context) FileAttachment(filepath, filename string) {
-	if isASCII(filename) {
-		c.Response().Header().Set("Content-Disposition", `attachment; filename="`+escapeQuotes(filename)+`"`)
-	} else {
-		c.Response().Header().Set("Content-Disposition", `attachment; filename*=UTF-8''`+url.QueryEscape(filename))
-	}
+	c.Response().Header().Set("Content-Disposition", contentDisposition("attachment", filename))
 	http.ServeFile(c.Response(), c.Request(), filepath)
+}
+
+// contentDisposition 生成 Content-Disposition 头，dispositionType 为 attachment 或 inline。
+// ASCII 文件名转义引号后直接放入 filename，非 ASCII 使用 RFC 5987 的 filename* 编码
+func contentDisposition(dispositionType, filename string) string {
+	if isASCII(filename) {
+		return dispositionType + `; filename="` + escapeQuotes(filename) + `"`
+	}
+	return dispositionType + `; filename*=UTF-8''` + url.QueryEscape(filename)
 }

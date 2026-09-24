@@ -21,7 +21,7 @@ const BindKey = "_gin-gonic/gin/bindkey"
 // Bind is a helper function for given interface object and returns a Gin middleware.
 func Bind(val any) HandlerFunc {
 	value := reflect.ValueOf(val)
-	if value.Kind() == reflect.Ptr {
+	if value.Kind() == reflect.Pointer {
 		panic(`Bind struct can not be a pointer. Example:
 	Use: gin.Bind(Struct{}) instead of gin.Bind(&Struct{})
 `)
@@ -82,10 +82,8 @@ func assert1(guard bool, text string) {
 }
 
 func filterFlags(content string) string {
-	for i, char := range content {
-		if char == ' ' || char == ';' {
-			return content[:i]
-		}
+	if i := strings.IndexAny(content, " ;"); i >= 0 {
+		return content[:i]
 	}
 	return content
 }
@@ -104,9 +102,7 @@ func parseAccept(acceptHeader string) []string {
 	parts := strings.Split(acceptHeader, ",")
 	out := make([]string, 0, len(parts))
 	for _, part := range parts {
-		if i := strings.IndexByte(part, ';'); i > 0 {
-			part = part[:i]
-		}
+		part, _, _ = strings.Cut(part, ";")
 		if part = strings.TrimSpace(part); part != "" {
 			out = append(out, part)
 		}
@@ -155,7 +151,7 @@ func resolveAddress(addr []string) string {
 
 // https://stackoverflow.com/questions/53069040/checking-a-string-contains-only-ascii-characters
 func isASCII(s string) bool {
-	for i := 0; i < len(s); i++ {
+	for i := range len(s) {
 		if s[i] > unicode.MaxASCII {
 			return false
 		}

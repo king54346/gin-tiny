@@ -6,20 +6,22 @@ package ginTiny
 
 import (
 	"bufio"
+	stdctx "context"
 	"crypto/tls"
 	"fmt"
 	"io"
 	"net"
 	"net/http"
 	"net/http/httptest"
-	"os"
 	"path/filepath"
 	"runtime"
+	"strings"
 	"sync"
 	"testing"
 	"time"
 
 	"github.com/stretchr/testify/assert"
+	"github.com/stretchr/testify/require"
 )
 
 // params[0]=url example:http://127.0.0.1:8080/index (cannot be empty)
@@ -39,7 +41,7 @@ func testRequest(t *testing.T, params ...string) {
 	client := &http.Client{Transport: tr}
 
 	resp, err := client.Get(params[0])
-	assert.NoError(t, err)
+	require.NoError(t, err)
 	defer resp.Body.Close()
 
 	body, ioerr := io.ReadAll(resp.Body)
@@ -62,18 +64,37 @@ func testRequest(t *testing.T, params ...string) {
 }
 
 func TestRunEmpty(t *testing.T) {
-	os.Setenv("PORT", "")
+	t.Setenv("PORT", "")
 	router := New()
-	go func() {
-		router.GET("/example", func(c Context) { c.String(http.StatusOK, "it worked") })
-		assert.NoError(t, router.Run())
-	}()
-	// have to wait for the goroutine to start and run the server
-	// otherwise the main thread will complete
-	time.Sleep(5 * time.Millisecond)
+	router.GET("/example", func(c Context) { c.String(http.StatusOK, "it worked") })
+	startServer(t, func(ctx stdctx.Context) error { return router.RunContext(ctx) })
+	waitForServer(t, "tcp", "localhost:8080")
 
 	assert.Error(t, router.Run(":8080"))
 	testRequest(t, "http://localhost:8080/example")
+}
+
+func TestRunTLS(t *testing.T) {
+	router := New()
+	router.GET("/example", func(c Context) { c.String(http.StatusOK, "it worked") })
+	startServer(t, func(ctx stdctx.Context) error {
+		return router.RunTLSContext(ctx, ":8443", "./testdata/certificate/cert.pem", "./testdata/certificate/key.pem")
+	})
+	waitForServer(t, "tcp", "localhost:8443")
+
+	assert.Error(t, router.RunTLS(":8443", "./testdata/certificate/cert.pem", "./testdata/certificate/key.pem"))
+	testRequest(t, "https://localhost:8443/example")
+}
+
+func TestRunEmptyWithEnv(t *testing.T) {
+	t.Setenv("PORT", "3123")
+	router := New()
+	router.GET("/example", func(c Context) { c.String(http.StatusOK, "it worked") })
+	startServer(t, func(ctx stdctx.Context) error { return router.RunContext(ctx) })
+	waitForServer(t, "tcp", "localhost:3123")
+
+	assert.Error(t, router.Run(":3123"))
+	testRequest(t, "http://localhost:3123/example")
 }
 
 func TestBadTrustedCIDRs(t *testing.T) {
@@ -151,37 +172,6 @@ func TestBadTrustedCIDRsForRunTLS(t *testing.T) {
 }
 */
 
-func TestRunTLS(t *testing.T) {
-	router := New()
-	go func() {
-		router.GET("/example", func(c Context) { c.String(http.StatusOK, "it worked") })
-
-		assert.NoError(t, router.RunTLS(":8443", "./testdata/certificate/cert.pem", "./testdata/certificate/key.pem"))
-	}()
-
-	// have to wait for the goroutine to start and run the server
-	// otherwise the main thread will complete
-	time.Sleep(5 * time.Millisecond)
-
-	assert.Error(t, router.RunTLS(":8443", "./testdata/certificate/cert.pem", "./testdata/certificate/key.pem"))
-	testRequest(t, "https://localhost:8443/example")
-}
-
-func TestRunEmptyWithEnv(t *testing.T) {
-	os.Setenv("PORT", "3123")
-	router := New()
-	go func() {
-		router.GET("/example", func(c Context) { c.String(http.StatusOK, "it worked") })
-		assert.NoError(t, router.Run())
-	}()
-	// have to wait for the goroutine to start and run the server
-	// otherwise the main thread will complete
-	time.Sleep(5 * time.Millisecond)
-
-	assert.Error(t, router.Run(":3123"))
-	testRequest(t, "http://localhost:3123/example")
-}
-
 func TestRunTooMuchParams(t *testing.T) {
 	router := New()
 	assert.Panics(t, func() {
@@ -191,13 +181,9 @@ func TestRunTooMuchParams(t *testing.T) {
 
 func TestRunWithPort(t *testing.T) {
 	router := New()
-	go func() {
-		router.GET("/example", func(c Context) { c.String(http.StatusOK, "it worked") })
-		assert.NoError(t, router.Run(":5150"))
-	}()
-	// have to wait for the goroutine to start and run the server
-	// otherwise the main thread will complete
-	time.Sleep(5 * time.Millisecond)
+	router.GET("/example", func(c Context) { c.String(http.StatusOK, "it worked") })
+	startServer(t, func(ctx stdctx.Context) error { return router.RunContext(ctx, ":5150") })
+	waitForServer(t, "tcp", "localhost:5150")
 
 	assert.Error(t, router.Run(":5150"))
 	testRequest(t, "http://localhost:5150/example")
@@ -206,9 +192,8 @@ func TestRunWithPort(t *testing.T) {
 func TestUnixSocket(t *testing.T) {
 	router := New()
 
-	unixTestSocket := filepath.Join(os.TempDir(), "unix_unit_test")
-
-	defer os.Remove(unixTestSocket)
+	// 每个测试独立的路径：固定路径在进程被中断时会残留 socket 文件，下次运行可能连到失效的旧 socket
+	unixTestSocket := filepath.Join(t.TempDir(), "gin.sock")
 
 	go func() {
 		router.GET("/example", func(c Context) { c.String(http.StatusOK, "it worked") })
@@ -216,17 +201,9 @@ func TestUnixSocket(t *testing.T) {
 	}()
 	// have to wait for the goroutine to start and run the server
 	// otherwise the main thread will complete
-	time.Sleep(5 * time.Millisecond)
+	waitForServer(t, "unix", unixTestSocket)
 
-	c, err := net.Dial("unix", unixTestSocket)
-	assert.NoError(t, err)
-
-	fmt.Fprint(c, "GET /example HTTP/1.0\r\n\r\n")
-	scanner := bufio.NewScanner(c)
-	var response string
-	for scanner.Scan() {
-		response += scanner.Text()
-	}
+	response := rawGet(t, "unix", unixTestSocket, "/example")
 	assert.Contains(t, response, "HTTP/1.0 200", "should get a 200")
 	assert.Contains(t, response, "it worked", "resp body should match")
 }
@@ -237,6 +214,9 @@ func TestBadUnixSocket(t *testing.T) {
 }
 
 func TestFileDescriptor(t *testing.T) {
+	if isWindows() {
+		t.Skip("net.FileListener is not supported on windows")
+	}
 	router := New()
 
 	addr, err := net.ResolveTCPAddr("tcp", "localhost:0")
@@ -261,17 +241,9 @@ func TestFileDescriptor(t *testing.T) {
 	}()
 	// have to wait for the goroutine to start and run the server
 	// otherwise the main thread will complete
-	time.Sleep(5 * time.Millisecond)
+	waitForServer(t, "tcp", listener.Addr().String())
 
-	c, err := net.Dial("tcp", listener.Addr().String())
-	assert.NoError(t, err)
-
-	fmt.Fprintf(c, "GET /example HTTP/1.0\r\n\r\n")
-	scanner := bufio.NewScanner(c)
-	var response string
-	for scanner.Scan() {
-		response += scanner.Text()
-	}
+	response := rawGet(t, "tcp", listener.Addr().String(), "/example")
 	assert.Contains(t, response, "HTTP/1.0 200", "should get a 200")
 	assert.Contains(t, response, "it worked", "resp body should match")
 }
@@ -293,17 +265,9 @@ func TestListener(t *testing.T) {
 	}()
 	// have to wait for the goroutine to start and run the server
 	// otherwise the main thread will complete
-	time.Sleep(5 * time.Millisecond)
+	waitForServer(t, "tcp", listener.Addr().String())
 
-	c, err := net.Dial("tcp", listener.Addr().String())
-	assert.NoError(t, err)
-
-	fmt.Fprintf(c, "GET /example HTTP/1.0\r\n\r\n")
-	scanner := bufio.NewScanner(c)
-	var response string
-	for scanner.Scan() {
-		response += scanner.Text()
-	}
+	response := rawGet(t, "tcp", listener.Addr().String(), "/example")
 	assert.Contains(t, response, "HTTP/1.0 200", "should get a 200")
 	assert.Contains(t, response, "it worked", "resp body should match")
 }
@@ -340,7 +304,7 @@ func TestConcurrentHandleContext(t *testing.T) {
 	var wg sync.WaitGroup
 	iterations := 200
 	wg.Add(iterations)
-	for i := 0; i < iterations; i++ {
+	for range iterations {
 		go func() {
 			testGetRequestHandler(t, router, "/")
 			wg.Done()
@@ -523,4 +487,56 @@ func TestTreeRunDynamicRouting(t *testing.T) {
 
 func isWindows() bool {
 	return runtime.GOOS == "windows"
+}
+
+// waitForServer 轮询直到服务可以连接，取代固定时长的 sleep：
+// 机器负载高时 5ms 不足以让服务启动，连接失败后继续使用 nil 连接会 panic 并拖垮整个包的测试
+func waitForServer(t *testing.T, network, addr string) {
+	t.Helper()
+	require.Eventually(t, func() bool {
+		c, err := net.Dial(network, addr)
+		if err != nil {
+			return false
+		}
+		c.Close()
+		return true
+	}, 3*time.Second, 5*time.Millisecond, "server %s://%s did not start", network, addr)
+}
+
+// rawGet 通过原始连接发送 HTTP/1.0 请求并读取完整响应。
+// 设置读写截止时间，服务端异常时让测试失败，而不是一直阻塞到全局超时
+func rawGet(t *testing.T, network, addr, path string) string {
+	t.Helper()
+	c, err := net.Dial(network, addr)
+	require.NoError(t, err)
+	defer c.Close()
+	require.NoError(t, c.SetDeadline(time.Now().Add(5*time.Second)))
+
+	_, err = fmt.Fprintf(c, "GET %s HTTP/1.0\r\n\r\n", path)
+	require.NoError(t, err)
+	var response strings.Builder
+	scanner := bufio.NewScanner(c)
+	for scanner.Scan() {
+		response.WriteString(scanner.Text())
+	}
+	require.NoError(t, scanner.Err())
+	return response.String()
+}
+
+// startServer 在后台运行服务，测试结束时取消 ctx 并等待服务优雅退出、释放端口，
+// 这样固定端口的测试也能在同一进程中重复运行（go test -count=N）
+func startServer(t *testing.T, run func(ctx stdctx.Context) error) {
+	t.Helper()
+	ctx, cancel := stdctx.WithCancel(stdctx.Background())
+	done := make(chan error, 1)
+	go func() { done <- run(ctx) }()
+	t.Cleanup(func() {
+		cancel()
+		select {
+		case err := <-done:
+			assert.NoError(t, err)
+		case <-time.After(5 * time.Second):
+			t.Error("server did not shut down in time")
+		}
+	})
 }

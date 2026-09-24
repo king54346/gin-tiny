@@ -7,9 +7,10 @@ package ginTiny
 import (
 	"crypto/subtle"
 	"encoding/base64"
-	"gin-tiny/internal/bytesconv"
+	"github.com/king54346/gin-tiny/internal/bytesconv"
 	"net/http"
 	"strconv"
+	"strings"
 )
 
 // AuthUserKey is the cookie name for user credential in basic auth.
@@ -26,9 +27,12 @@ type authPair struct {
 type authPairs []authPair
 
 func (a authPairs) searchCredential(authValue string) (string, bool) {
-	if authValue == "" {
+	// RFC 7617：认证方案名不区分大小写，方案名与凭据之间可以有多个空格。规范化后再做常数时间比较
+	scheme, credentials, ok := strings.Cut(strings.TrimSpace(authValue), " ")
+	if !ok || !strings.EqualFold(scheme, "Basic") {
 		return "", false
 	}
+	authValue = "Basic " + strings.TrimSpace(credentials)
 	for _, pair := range a {
 		if subtle.ConstantTimeCompare(bytesconv.StringToBytes(pair.value), bytesconv.StringToBytes(authValue)) == 1 {
 			return pair.user, true

@@ -362,7 +362,7 @@ func TestRaceContextCopy(t *testing.T) {
 	assert.Equal(t, "run OK, no panics", w.Body.String())
 }
 
-func readWriteKeys(c *context) {
+func readWriteKeys(c Context) {
 	for {
 		c.Set("1", rand.Int())
 		c.Set("2", c.Value("1"))

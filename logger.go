@@ -9,6 +9,7 @@ import (
 	"io"
 	"net/http"
 	"os"
+	"sync/atomic"
 	"time"
 
 	"github.com/mattn/go-isatty"
@@ -36,7 +37,8 @@ const (
 	reset   = "\033[0m"
 )
 
-var consoleColorMode = autoColor
+// consoleColorMode 在启动时由 DisableConsoleColor/ForceConsoleColor 写入，每个请求读取，用原子变量避免数据竞争（零值即 autoColor）
+var consoleColorMode atomic.Int32
 
 // LoggerConfig defines the config for Logger middleware.
 type LoggerConfig struct {
@@ -128,7 +130,8 @@ func (p *LogFormatterParams) ResetColor() string {
 
 // IsOutputColor indicates whether can colors be outputted to the log.
 func (p *LogFormatterParams) IsOutputColor() bool {
-	return consoleColorMode == forceColor || (consoleColorMode == autoColor && p.isTerm)
+	mode := consoleColorModeValue(consoleColorMode.Load())
+	return mode == forceColor || (mode == autoColor && p.isTerm)
 }
 
 // defaultLogFormatter is the default log format function Logger middleware uses.
@@ -156,12 +159,12 @@ var defaultLogFormatter = func(param LogFormatterParams) string {
 
 // DisableConsoleColor disables color output in the console.
 func DisableConsoleColor() {
-	consoleColorMode = disableColor
+	consoleColorMode.Store(int32(disableColor))
 }
 
 // ForceConsoleColor force color output in the console.
 func ForceConsoleColor() {
-	consoleColorMode = forceColor
+	consoleColorMode.Store(int32(forceColor))
 }
 
 // ErrorLogger returns a HandlerFunc for any error type.

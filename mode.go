@@ -6,9 +6,10 @@ package ginTiny
 
 import (
 	"flag"
-	"gin-tiny/binding"
+	"github.com/king54346/gin-tiny/binding"
 	"io"
 	"os"
+	"sync/atomic"
 )
 
 // EnvGinMode indicates environment name for gin mode.
@@ -42,10 +43,11 @@ var DefaultWriter io.Writer = os.Stdout
 // DefaultErrorWriter is the default io.Writer used by Gin to debug errors
 var DefaultErrorWriter io.Writer = os.Stderr
 
-var (
-	ginMode  = debugCode
-	modeName = DebugMode
-)
+// ginMode 是唯一的模式状态，Mode() 返回的名字由它推导，保证并发 SetMode 时二者不会不一致
+var ginMode atomic.Int32
+
+// modeNames 按模式码索引的模式名
+var modeNames = [...]string{debugCode: DebugMode, releaseCode: ReleaseMode, testCode: TestMode}
 
 func init() {
 	mode := os.Getenv(EnvGinMode)
@@ -64,16 +66,14 @@ func SetMode(value string) {
 
 	switch value {
 	case DebugMode:
-		ginMode = debugCode
+		ginMode.Store(debugCode)
 	case ReleaseMode:
-		ginMode = releaseCode
+		ginMode.Store(releaseCode)
 	case TestMode:
-		ginMode = testCode
+		ginMode.Store(testCode)
 	default:
 		panic("gin mode unknown: " + value + " (available mode: debug release test)")
 	}
-
-	modeName = value
 }
 
 // DisableBindValidation closes the default validator.
@@ -95,5 +95,5 @@ func EnableJsonDecoderDisallowUnknownFields() {
 
 // Mode returns current gin mode.
 func Mode() string {
-	return modeName
+	return modeNames[ginMode.Load()]
 }

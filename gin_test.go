@@ -10,6 +10,7 @@ import (
 	"io"
 	"net"
 	"net/http"
+	"net/netip"
 	"reflect"
 	"strconv"
 	"sync/atomic"
@@ -90,6 +91,13 @@ func TestAddRoute(t *testing.T) {
 
 	router.addRoute("POST", "/post", HandlersChain{func(_ Context) {}})
 	assert.Len(t, router.trees.getNotNullMethodTree(), 2)
+
+	// 不含通配符的路由同时进入该方法的静态索引，含通配符的只在树中
+	router.addRoute("POST", "/post/:id", HandlersChain{func(_ Context) {}})
+	post := router.trees.getTree("POST")
+	assert.Contains(t, post.static, "/")
+	assert.Contains(t, post.static, "/post")
+	assert.NotContains(t, post.static, "/post/:id")
 }
 
 func TestAddRouteFails(t *testing.T) {
@@ -242,22 +250,22 @@ func TestListOfRoutes(t *testing.T) {
 	assertRoutePresent(t, list, RouteInfo{
 		Method:  "GET",
 		Path:    "/",
-		Handler: "^(.*/vendor/)?gin-tiny.handlerTest1$",
+		Handler: "^(.*/vendor/)?github.com/king54346/gin-tiny.handlerTest1$",
 	})
 	assertRoutePresent(t, list, RouteInfo{
 		Method:  "GET",
 		Path:    "/users/",
-		Handler: "^(.*/vendor/)?gin-tiny.handlerTest2$",
+		Handler: "^(.*/vendor/)?github.com/king54346/gin-tiny.handlerTest2$",
 	})
 	assertRoutePresent(t, list, RouteInfo{
 		Method:  "GET",
 		Path:    "/users/:id",
-		Handler: "^(.*/vendor/)?gin-tiny.handlerTest1$",
+		Handler: "^(.*/vendor/)?github.com/king54346/gin-tiny.handlerTest1$",
 	})
 	assertRoutePresent(t, list, RouteInfo{
 		Method:  "POST",
 		Path:    "/users/:id",
-		Handler: "^(.*/vendor/)?gin-tiny.handlerTest2$",
+		Handler: "^(.*/vendor/)?github.com/king54346/gin-tiny.handlerTest2$",
 	})
 }
 
@@ -322,7 +330,7 @@ func TestPrepareTrustedCIRDsWith(t *testing.T) {
 
 	// valid ipv4 cidr
 	{
-		expectedTrustedCIDRs := []*net.IPNet{parseCIDR("0.0.0.0/0")}
+		expectedTrustedCIDRs := []netip.Prefix{parseCIDR("0.0.0.0/0")}
 		err := r.SetTrustedProxies([]string{"0.0.0.0/0"})
 
 		assert.NoError(t, err)
@@ -338,7 +346,7 @@ func TestPrepareTrustedCIRDsWith(t *testing.T) {
 
 	// valid ipv4 address
 	{
-		expectedTrustedCIDRs := []*net.IPNet{parseCIDR("192.168.1.33/32")}
+		expectedTrustedCIDRs := []netip.Prefix{parseCIDR("192.168.1.33/32")}
 
 		err := r.SetTrustedProxies([]string{"192.168.1.33"})
 
@@ -355,7 +363,7 @@ func TestPrepareTrustedCIRDsWith(t *testing.T) {
 
 	// valid ipv6 address
 	{
-		expectedTrustedCIDRs := []*net.IPNet{parseCIDR("2002:0000:0000:1234:abcd:ffff:c0a8:0101/128")}
+		expectedTrustedCIDRs := []netip.Prefix{parseCIDR("2002:0000:0000:1234:abcd:ffff:c0a8:0101/128")}
 		err := r.SetTrustedProxies([]string{"2002:0000:0000:1234:abcd:ffff:c0a8:0101"})
 
 		assert.NoError(t, err)
@@ -371,7 +379,7 @@ func TestPrepareTrustedCIRDsWith(t *testing.T) {
 
 	// valid ipv6 cidr
 	{
-		expectedTrustedCIDRs := []*net.IPNet{parseCIDR("::/0")}
+		expectedTrustedCIDRs := []netip.Prefix{parseCIDR("::/0")}
 		err := r.SetTrustedProxies([]string{"::/0"})
 
 		assert.NoError(t, err)
@@ -387,7 +395,7 @@ func TestPrepareTrustedCIRDsWith(t *testing.T) {
 
 	// valid combination
 	{
-		expectedTrustedCIDRs := []*net.IPNet{
+		expectedTrustedCIDRs := []netip.Prefix{
 			parseCIDR("::/0"),
 			parseCIDR("192.168.0.0/16"),
 			parseCIDR("172.16.0.1/32"),
@@ -422,12 +430,8 @@ func TestPrepareTrustedCIRDsWith(t *testing.T) {
 	}
 }
 
-func parseCIDR(cidr string) *net.IPNet {
-	_, parsedCIDR, err := net.ParseCIDR(cidr)
-	if err != nil {
-		fmt.Println(err)
-	}
-	return parsedCIDR
+func parseCIDR(cidr string) netip.Prefix {
+	return netip.MustParsePrefix(cidr).Masked()
 }
 
 func assertRoutePresent(t *testing.T, gotRoutes RoutesInfo, wantRoute RouteInfo) {

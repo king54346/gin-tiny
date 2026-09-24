@@ -41,11 +41,9 @@ type ResponseWriter interface {
 	// WriteHeaderNow forces to write the http header (status code + headers).
 	WriteHeaderNow()
 
-	Write(data []byte) (n int, err error)
+	// Header / Write / WriteHeader 由内嵌的 http.ResponseWriter 提供，不要在此重复声明：
+	// 重复声明虽然能编译，但会让嵌入 ResponseWriter 的类型（如 gzipWriter）在 IDE 中报「不明确的引用」
 
-	WriteHeader(int)
-
-	Header() http.Header
 	// Pusher get the http.Pusher for server push
 	Pusher() http.Pusher
 	// Before registers a function to be called before WriteHeaderNow.
@@ -60,28 +58,10 @@ type responseWriter struct {
 	afterFuncs  []func()
 	size        int
 	status      int
-	committed   bool
 }
 
 var _ ResponseWriter = (*responseWriter)(nil)
 
-// 适配器：将 ResponseWriter 接口适配为 *responseWriter
-type responseWriterAdapter struct {
-	ResponseWriter
-	size   int
-	status int
-}
-
-func (rwa *responseWriterAdapter) reset(writer http.ResponseWriter) {
-	// 适配器不支持 reset，因为它包装的是接口
-}
-
-func (rwa *responseWriterAdapter) Unwrap() http.ResponseWriter {
-	if unwrapper, ok := rwa.ResponseWriter.(interface{ Unwrap() http.ResponseWriter }); ok {
-		return unwrapper.Unwrap()
-	}
-	return nil
-}
 func NewResponseWriter(writer http.ResponseWriter) *responseWriter {
 	w := &responseWriter{
 		ResponseWriter: writer,
@@ -97,23 +77,21 @@ func (w *responseWriter) Unwrap() http.ResponseWriter {
 	return w.ResponseWriter
 }
 
+// reset 在 context 从 sync.Pool 取出时调用。
+// 复用切片底层数组避免每个请求都分配，clear 掉旧闭包避免持有上个请求的引用导致内存无法回收
 func (w *responseWriter) reset(writer http.ResponseWriter) {
-	w.beforeFuncs = make([]func(), 0, 4)
-	w.afterFuncs = make([]func(), 0, 4)
+	clear(w.beforeFuncs)
+	clear(w.afterFuncs)
+	w.beforeFuncs = w.beforeFuncs[:0]
+	w.afterFuncs = w.afterFuncs[:0]
 	w.ResponseWriter = writer
 	w.size = noWritten
 	w.status = defaultStatus
 }
 
+// WriteHeader 只记录状态码，真正写出延迟到 WriteHeaderNow/Write，方便中间件在写出前修改
 func (w *responseWriter) WriteHeader(code int) {
-	if code > 0 && w.status != code {
-		if w.Written() {
-			// 直接返回，不做任何操作
-			// debugPrint("[WARNING] Headers were already written. Wanted to override status code %d with %d", w.status, code)
-			return
-		}
-		w.status = code
-	}
+	w.SetStatus(code)
 }
 
 func (w *responseWriter) WriteHeaderNow() {
@@ -151,6 +129,9 @@ func (w *responseWriter) WriteString(s string) (n int, err error) {
 	w.WriteHeaderNow()
 	n, err = io.WriteString(w.ResponseWriter, s)
 	w.size += n
+	for _, fn := range w.afterFuncs {
+		fn()
+	}
 	return
 }
 
@@ -172,13 +153,14 @@ func (w *responseWriter) Hijack() (net.Conn, *bufio.ReadWriter, error) {
 	if w.size < 0 {
 		w.size = 0
 	}
-	return w.ResponseWriter.(http.Hijacker).Hijack()
+	return http.NewResponseController(w.ResponseWriter).Hijack()
 }
 
 // Flush implements the http.Flusher interface.
+// 使用 http.ResponseController，可以穿透实现了 Unwrap() 的多层包装 writer
 func (w *responseWriter) Flush() {
 	w.WriteHeaderNow()
-	w.ResponseWriter.(http.Flusher).Flush()
+	_ = http.NewResponseController(w.ResponseWriter).Flush()
 }
 
 func (w *responseWriter) Pusher() (pusher http.Pusher) {
@@ -189,11 +171,7 @@ func (w *responseWriter) Pusher() (pusher http.Pusher) {
 }
 
 func (w *responseWriter) SetStatus(status int) {
-	if status > 0 && w.status != status {
-		if w.Written() {
-			//debugPrint("[WARNING] Headers were already written. Wanted to override status code %d with %d", w.status, status)
-			return
-		}
+	if status > 0 && w.status != status && !w.Written() {
 		w.status = status
 	}
 }

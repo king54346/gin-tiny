@@ -8,6 +8,7 @@ import (
 	"fmt"
 	"net/http"
 	"net/http/httptest"
+	"strings"
 	"testing"
 
 	"github.com/stretchr/testify/assert"
@@ -578,7 +579,6 @@ func TestEngineHandleMethodNotAllowedCornerCase(t *testing.T) {
 	assert.Equal(t, http.StatusNotFound, w.Code)
 }
 
-// todo 需要专门一个staticRouter 能够添加不同的method方法；
 func TestRouterGroupStaticRouter(t *testing.T) {
 	router := New()
 
@@ -624,4 +624,26 @@ func TestRouterGroupStaticRouter(t *testing.T) {
 
 	// 验证处理器被调用的次数等于HTTP方法的数量
 	assert.Equal(t, len(anyMethods), count)
+}
+
+func TestRouteNotAllowedSetsAllowHeader(t *testing.T) {
+	router := New()
+	router.HandleMethodNotAllowed = true
+	router.POST("/path", func(c Context) {})
+	router.PUT("/path", func(c Context) {})
+	router.StaticMatch([]string{http.MethodDelete}, "/static", func(c Context) {})
+	router.GET("/static", func(c Context) {})
+
+	w := PerformRequest(router, http.MethodGet, "/path")
+	assert.Equal(t, http.StatusMethodNotAllowed, w.Code)
+	assert.ElementsMatch(t, []string{http.MethodPost, http.MethodPut}, strings.Split(w.Header().Get("Allow"), ", "))
+
+	// 静态路由和 radix 树上的方法都要出现在 Allow 中
+	w = PerformRequest(router, http.MethodPatch, "/static")
+	assert.Equal(t, http.StatusMethodNotAllowed, w.Code)
+	assert.ElementsMatch(t, []string{http.MethodDelete, http.MethodGet}, strings.Split(w.Header().Get("Allow"), ", "))
+
+	w = PerformRequest(router, http.MethodGet, "/missing")
+	assert.Equal(t, http.StatusNotFound, w.Code)
+	assert.Empty(t, w.Header().Get("Allow"))
 }

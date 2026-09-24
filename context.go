@@ -5,12 +5,14 @@
 package ginTiny
 
 import (
+	stdctx "context"
 	"errors"
 	"fmt"
-	"gin-tiny/binding"
-	"gin-tiny/render"
+	"github.com/king54346/gin-tiny/binding"
+	"github.com/king54346/gin-tiny/render"
+	"html/template"
 	"io"
-	"log"
+	"maps"
 	"math"
 	"mime/multipart"
 	"net"
@@ -18,11 +20,10 @@ import (
 	"net/url"
 	"os"
 	"path/filepath"
+	"slices"
 	"strings"
 	"sync"
 	"time"
-
-	"github.com/gin-contrib/sse"
 )
 
 // Content-Type MIME of the most common data formats.
@@ -56,93 +57,209 @@ var (
 	ErrValidatorNotRegistered = errors.New("validator not registered")
 )
 
-// Context 接口定义保持不变...
+// Context 是处理函数拿到的请求上下文。
+// 具体实现为非导出的 *context，这样框架可以在不破坏用户代码的前提下调整内部字段；
+// 所有对外能力都必须出现在这个接口里，否则用户通过 Context 调用不到。
+//
+// Context 由下面按职责划分的小接口组合而成。编写辅助函数或中间件时，
+// 参数只声明实际需要的那部分（例如 func currentUser(kv KeyValueStore)），
+// 依赖更清晰，测试时也只需 mock 少量方法。
 type Context interface {
-	// 保持原有接口定义不变
+	stdctx.Context // Deadline / Done / Err / Value，均基于 Request().Context()
+
+	RequestReader
+	PathParams
+	QueryReader
+	FormReader
+	CookieAccessor
+	KeyValueStore
+	Binder
+	Renderer
+	FileResponder
+	FlowController
+
+	// Reset 重置为初始状态，由框架在复用 context 时调用
+	Reset()
+	// Copy 返回可以安全地在 goroutine 中使用的只读副本
+	Copy() Context
+}
+
+// RequestReader 读取请求信息，以及读写底层的 Request / ResponseWriter
+type RequestReader interface {
 	Request() *http.Request
 	SetRequest(r *http.Request)
-	SetResponse(r ResponseWriter)
 	Response() ResponseWriter
+	SetResponse(r ResponseWriter)
 	IsTLS() bool
 	IsWebsocket() bool
 	Scheme() string
-	RealIP() string
-	Path() string
+	ClientIP() string
+	RealIP() string // 等价于 ClientIP
+	RemoteIP() string
+	ContentType() string
+	RequestHeader(key string) string
+	GetHeader(key string) string // 等价于 RequestHeader
+	GetRawData() ([]byte, error)
+}
+
+// PathParams 读写路由匹配得到的路径参数
+type PathParams interface {
+	FullPath() string
+	Path() string // 等价于 FullPath
 	SetPath(p string)
 	Param(name string) string
 	ParamGet(name string) (string, bool)
+	Params() Params
 	ParamNames() []string
 	SetParamNames(names ...string)
 	ParamValues() []string
 	SetParamValues(values ...string)
+	AddParam(key, value string)
+}
+
+// QueryReader 读取 URL 查询参数
+type QueryReader interface {
 	QueryParams() url.Values
 	QueryString() string
-	FormValue(name string) string
+	Query(key string) string
+	DefaultQuery(key, defaultValue string) string
+	GetQuery(key string) (string, bool)
+	QueryArray(key string) []string
+	GetQueryArray(key string) ([]string, bool)
+	QueryMap(key string) map[string]string
+	GetQueryMap(key string) (map[string]string, bool)
+}
+
+// FormReader 读取表单与上传文件
+type FormReader interface {
+	PostForm(key string) string
+	FormValue(name string) string // 等价于 PostForm
 	FormParams() (url.Values, error)
+	DefaultPostForm(key, defaultValue string) string
+	GetPostForm(key string) (string, bool)
+	PostFormArray(key string) []string
+	GetPostFormArray(key string) ([]string, bool)
+	PostFormMap(key string) map[string]string
+	GetPostFormMap(key string) (map[string]string, bool)
 	FormFile(name string) (*multipart.FileHeader, error)
 	MultipartForm() (*multipart.Form, error)
+	SaveUploadedFile(file *multipart.FileHeader, dst string) error
+}
+
+// CookieAccessor 读写 Cookie
+type CookieAccessor interface {
 	Cookie(name string) (*http.Cookie, error)
-	SetCookie(name, value string, maxAge int, path, domain string, secure, httpOnly bool)
 	Cookies() []*http.Cookie
+	SetCookie(name, value string, maxAge int, path, domain string, secure, httpOnly bool)
+	SetSameSite(samesite http.SameSite)
+}
+
+// KeyValueStore 请求级别的键值存储，并发安全。
+// 类型化读取推荐使用泛型函数 GetAs / MustGetAs，GetString 等方法为兼容 gin 保留
+type KeyValueStore interface {
+	Set(key string, val any)
 	Get(key string) (value any, exists bool)
-	Set(key string, val interface{})
-	Bind(i interface{}) error
-	Validate(i interface{}) error
+	MustGet(key string) any
+	GetString(key string) string
+	GetBool(key string) bool
+	GetInt(key string) int
+	GetInt64(key string) int64
+	GetUint(key string) uint
+	GetUint64(key string) uint64
+	GetFloat64(key string) float64
+	GetTime(key string) time.Time
+	GetDuration(key string) time.Duration
+	GetStringSlice(key string) []string
+	GetStringMap(key string) map[string]any
+	GetStringMapString(key string) map[string]string
+	GetStringMapStringSlice(key string) map[string][]string
+}
+
+// Binder 把请求数据绑定到结构体并校验。
+// Bind* 失败时以 400 中止请求；ShouldBind* 只返回错误，由调用方决定如何响应
+type Binder interface {
+	Bind(obj any) error
+	BindJSON(obj any) error
+	BindXML(obj any) error
+	BindQuery(obj any) error
+	BindYAML(obj any) error
+	BindTOML(obj any) error
+	BindHeader(obj any) error
+	BindUri(obj any) error
+	MustBindWith(obj any, b binding.Binding) error
+	ShouldBind(obj any) error
+	ShouldBindJSON(obj any) error
+	ShouldBindXML(obj any) error
+	ShouldBindQuery(obj any) error
+	ShouldBindYAML(obj any) error
+	ShouldBindTOML(obj any) error
+	ShouldBindHeader(obj any) error
+	ShouldBindUri(obj any) error
+	ShouldBindWith(obj any, b binding.Binding) error
+	ShouldBindBodyWith(obj any, bb binding.BindingBody) error
+	Validate(i any) error
+}
+
+// Renderer 设置状态码和响应头，并以各种格式写出响应体
+type Renderer interface {
+	Status(code int)
+	Header(key, value string)
 	Render(code int, r render.Render)
-	HTMLBlob(code int, b []byte) error
 	String(code int, format string, values ...any)
 	JSON(code int, obj any)
-	JSONBlob(code int, b []byte) error
+	IndentedJSON(code int, obj any)
+	SecureJSON(code int, obj any)
 	JSONP(code int, obj any)
-	JSONPBlob(code int, callback string, b []byte) error
+	AsciiJSON(code int, obj any)
+	PureJSON(code int, obj any)
 	XML(code int, obj any)
-	XMLBlob(code int, b []byte) error
-	Blob(code int, contentType string, b []byte) error
-	Stream(step func(w io.Writer) bool) bool
-	File(filepath string)
-	Attachment(file string, name string) error
-	Inline(file string, name string) error
-	NoContent(code int)
-	Redirect(code int, location string)
+	YAML(code int, obj any)
+	TOML(code int, obj any)
+	ProtoBuf(code int, obj any)
 	Data(code int, contentType string, data []byte)
 	DataFromReader(code int, contentLength int64, contentType string, reader io.Reader, extraHeaders map[string]string)
+	Blob(code int, contentType string, b []byte) error // 等价于 Data
+	HTMLBlob(code int, b []byte) error                 // 等价于 Data(code, "text/html; charset=utf-8", b)
+	JSONBlob(code int, b []byte) error                 // 等价于 Data(code, "application/json; charset=utf-8", b)
+	XMLBlob(code int, b []byte) error                  // 等价于 Data(code, "application/xml; charset=utf-8", b)
+	JSONPBlob(code int, callback string, b []byte) error
+	NoContent(code int)
+	Redirect(code int, location string)
+	SSEvent(name string, message any)
+	Stream(step func(w io.Writer) bool) bool
+	Negotiate(code int, config Negotiate)
+	NegotiateFormat(offered ...string) string
+	SetAccepted(formats ...string)
+}
+
+// FileResponder 以文件内容作为响应
+type FileResponder interface {
+	File(filepath string)
+	FileFromFS(filepath string, fs http.FileSystem)
+	FileAttachment(filepath, filename string)
+	Attachment(file string, name string) error // 等价于 FileAttachment
+	Inline(file string, name string) error
+	ServeStaticFile(fs http.FileSystem, fileServer http.Handler)
+}
+
+// FlowController 控制处理链的执行，并收集处理过程中的错误
+type FlowController interface {
+	Next()
+	Abort()
+	IsAborted() bool
+	AbortWithStatus(code int)
+	AbortWithStatusJSON(code int, jsonObj any)
+	AbortWithError(code int, err error) *Error
 	Error(err error) *Error
+	Errors() errorMsgs
 	Handlers() HandlersChain
 	SetHandlers(handlers HandlersChain)
 	SetHandler(h HandlerFunc)
-	Reset()
-	FileFromFS(f string, fs http.FileSystem)
-	Header(s string, realm string)
-	AbortWithStatus(unauthorized int)
-	AbortWithStatusJSON(code int, jsonObj any)
-	AbortWithError(code int, err error) *Error
-	RequestHeader(s string) string
-	GetRawData() ([]byte, error)
-	Abort()
-	Next()
-	ClientIP() string
-	RemoteIP() string
-	Errors() errorMsgs
-	ServeStaticFile(fs http.FileSystem, fileServer http.Handler)
-	ShouldBind(obj any) error
-	Copy() *context
-	Done() <-chan struct{}
-	Deadline() (deadline time.Time, ok bool)
-	Err() error
-	Value(key any) any
-	MustGet(key string) any
-	FullPath() string
-	Status(code int)
-	ShouldBindUri(obj any) error
-	BindUri(obj any) error
-	Params() Params
-	ShouldBindJSON(obj any) error
-	ShouldBindXML(obj any) error
-	ShouldBindYAML(obj any) error
-	ShouldBindQuery(obj any) error
-	ShouldBindTOML(obj any) error
-	ShouldBindWith(obj any, b binding.Binding) error
+	HandlerName() string
+	HandlerNames() []string
 }
+
+var _ Context = (*context)(nil)
 
 type context struct {
 	writermem *responseWriter
@@ -186,6 +303,8 @@ func (c *context) Reset() {
 	c.index = -1
 	c.fullPath = ""
 	c.Keys = nil
+	// 和 responseWriter.reset 一样先 clear，避免底层数组继续引用上个请求的 *Error
+	clear(c.errors)
 	c.errors = c.errors[:0]
 	c.Accepted = nil
 	c.queryCache = nil
@@ -200,44 +319,55 @@ func (c *context) Reset() {
 }
 
 // Copy 返回可安全在请求范围外使用的 context 副本
-func (c *context) Copy() *context {
+//
+// 副本的请求 context 通过 context.WithoutCancel 与原请求脱钩：保留其中的值，但不继承取消和截止时间。
+// handler 返回后 net/http 会取消原请求的 context，若副本继承取消信号，
+// 在 goroutine 中用副本发起的异步调用会被立即中断
+func (c *context) Copy() Context {
 	cp := context{
 		request: c.request,
 		engine:  c.engine,
 	}
+	if c.request != nil {
+		cp.request = c.request.WithContext(stdctx.WithoutCancel(c.request.Context()))
+	}
 
-	// 深拷贝 writermem
+	// 深拷贝 writermem。before/after 回调切片也要独立一份，
+	// 否则副本 append 时可能写进原切片底层数组的空闲容量，与原请求互相覆盖
 	if c.writermem != nil {
 		w := *c.writermem
+		w.beforeFuncs = slices.Clone(w.beforeFuncs)
+		w.afterFuncs = slices.Clone(w.afterFuncs)
 		cp.writermem = &w
 	}
 
-	cp.index = abortIndex
+	// 副本没有处理链，对它调用 Next() 不会执行任何 handler；初始为未中止状态，
+	// 这样 IsAborted() 能如实反映副本上是否调用过 Abort()（timeout 中间件依赖这一点）
+	cp.index = -1
 	cp.handlers = nil
 	cp.fullPath = c.fullPath
 
 	// 深拷贝 Keys
-	cp.Keys = make(map[string]any, len(c.Keys))
 	c.mu.RLock()
-	for k, v := range c.Keys {
-		cp.Keys[k] = v
-	}
+	cp.Keys = maps.Clone(c.Keys)
 	c.mu.RUnlock()
 
 	// 深拷贝 params
 	if c.params != nil {
-		newParams := make(Params, len(*c.params))
-		copy(newParams, *c.params)
+		newParams := slices.Clone(*c.params)
 		cp.params = &newParams
 	}
 
 	// 深拷贝 errors
-	if len(c.errors) > 0 {
-		cp.errors = make(errorMsgs, len(c.errors))
-		copy(cp.errors, c.errors)
-	}
+	cp.errors = slices.Clone(c.errors)
 
-	cp.skippedNodes = c.skippedNodes
+	// skippedNodes 是路由匹配时的临时缓冲区，副本必须独立一份，
+	// 否则在 goroutine 中对副本调用 HandleContext 会和原请求竞争同一块内存
+	var skipped []skippedNode
+	if c.skippedNodes != nil {
+		skipped = make([]skippedNode, 0, cap(*c.skippedNodes))
+	}
+	cp.skippedNodes = &skipped
 	return &cp
 }
 
@@ -293,16 +423,28 @@ func (c *context) Scheme() string {
 	if c.IsTLS() {
 		return "https"
 	}
-	if scheme := c.RequestHeader("X-Forwarded-Proto"); scheme != "" {
-		return scheme
-	}
-	if scheme := c.RequestHeader("X-Forwarded-Protocol"); scheme != "" {
-		return scheme
-	}
-	if ssl := c.RequestHeader("X-Forwarded-Ssl"); ssl == "on" {
-		return "https"
+	// 与 ClientIP 一致：只采信可信代理转发的头，否则客户端可以伪造 X-Forwarded-Proto: https
+	if c.fromTrustedProxy() {
+		if scheme := c.RequestHeader("X-Forwarded-Proto"); scheme != "" {
+			return scheme
+		}
+		if scheme := c.RequestHeader("X-Forwarded-Protocol"); scheme != "" {
+			return scheme
+		}
+		if ssl := c.RequestHeader("X-Forwarded-Ssl"); ssl == "on" {
+			return "https"
+		}
 	}
 	return "http"
+}
+
+// fromTrustedProxy 判断请求的直接来源是否为 Engine.SetTrustedProxies 配置的可信代理（默认信任全部）
+func (c *context) fromTrustedProxy() bool {
+	if c.engine == nil {
+		return true
+	}
+	ip, err := parseAddr(c.RemoteIP())
+	return err == nil && c.engine.isTrustedProxy(ip)
 }
 
 // RealIP 返回客户端真实 IP
@@ -555,13 +697,20 @@ func (c *context) GetPostFormMap(key string) (map[string]string, bool) {
 // get 内部方法，返回满足条件的映射
 func (c *context) get(m map[string][]string, key string) (map[string]string, bool) {
 	dicts := make(map[string]string)
+	if key == "" {
+		return dicts, false
+	}
 	exist := false
+	prefix := key + "["
 	for k, v := range m {
-		if i := strings.IndexByte(k, '['); i >= 1 && k[0:i] == key {
-			if j := strings.IndexByte(k[i+1:], ']'); j >= 1 {
-				exist = true
-				dicts[k[i+1:][:j]] = v[0]
-			}
+		// 形如 key[sub]=value 的参数；手工构造的 url.Values 可能出现空切片
+		rest, ok := strings.CutPrefix(k, prefix)
+		if !ok || len(v) == 0 {
+			continue
+		}
+		if sub, _, found := strings.Cut(rest, "]"); found && sub != "" {
+			exist = true
+			dicts[sub] = v[0]
 		}
 	}
 	return dicts, exist
@@ -683,12 +832,40 @@ func (c *context) MustGet(key string) any {
 	panic(fmt.Sprintf("Key \"%s\" does not exist", key))
 }
 
-// 泛型获取方法，减少重复代码
-func getValue[T any](c *context, key string) (t T) {
-	if val, ok := c.Get(key); ok && val != nil {
-		t, _ = val.(T)
+// GetAs 以泛型方式从 Context 的 Keys 中取值，key 不存在或类型不匹配时 ok 为 false
+//
+//	user, ok := ginTiny.GetAs[*User](c, "user")
+func GetAs[T any](c Context, key string) (v T, ok bool) {
+	val, exists := c.Get(key)
+	if !exists {
+		return v, false
 	}
-	return
+	v, ok = val.(T)
+	return v, ok
+}
+
+// MustGetAs 与 GetAs 相同，但 key 不存在或类型不匹配时 panic
+func MustGetAs[T any](c Context, key string) T {
+	v, ok := GetAs[T](c, key)
+	if !ok {
+		panic(fmt.Sprintf("key %q does not exist or is not of type %T", key, v))
+	}
+	return v
+}
+
+// ShouldBindAs 自动选择绑定器并返回绑定好的值，省去先声明变量再传指针
+//
+//	req, err := ginTiny.ShouldBindAs[LoginReq](c)
+func ShouldBindAs[T any](c Context) (T, error) {
+	var obj T
+	err := c.ShouldBind(&obj)
+	return obj, err
+}
+
+// getValue 是 GetString/GetInt 等方法的内部实现
+func getValue[T any](c *context, key string) T {
+	v, _ := GetAs[T](c, key)
+	return v
 }
 
 // GetString 返回字符串值
@@ -809,8 +986,8 @@ func (c *context) Error(err error) *Error {
 		panic(ErrNilParam)
 	}
 
-	var parsedError *Error
-	if !errors.As(err, &parsedError) {
+	parsedError, ok := asError(err)
+	if !ok {
 		parsedError = &Error{
 			Err:  err,
 			Type: ErrorTypePrivate,
@@ -890,7 +1067,7 @@ func (c *context) BindUri(obj any) error {
 // ShouldBindUri 绑定 URI 参数（不中止）
 func (c *context) ShouldBindUri(obj any) error {
 	m := make(map[string][]string)
-	for _, v := range *c.params {
+	for _, v := range c.Params() {
 		m[v.Key] = []string{v.Value}
 	}
 	return binding.Uri.BindUri(m, obj)
@@ -915,7 +1092,7 @@ func (c *context) ShouldBindBodyWith(obj any, bb binding.BindingBody) (err error
 }
 
 // Validate 验证数据
-func (c *context) Validate(i interface{}) error {
+func (c *context) Validate(i any) error {
 	if c.engine != nil && c.engine.Validator != nil {
 		return c.engine.Validator.Validate(i)
 	}
@@ -1072,7 +1249,8 @@ func (c *context) JSONBlob(code int, b []byte) error {
 func (c *context) JSONPBlob(code int, callback string, b []byte) error {
 	c.Status(code)
 	c.Header("Content-Type", "application/javascript; charset=utf-8")
-	if _, err := c.Response().Write([]byte(callback + "(")); err != nil {
+	// callback 通常来自 query 参数，和 render.JsonpJSON 一样转义，防止 XSS
+	if _, err := c.Response().Write([]byte(template.JSEscapeString(callback) + "(")); err != nil {
 		return err
 	}
 	if _, err := c.Response().Write(b); err != nil {
@@ -1107,14 +1285,14 @@ func (c *context) Attachment(file string, name string) error {
 
 // Inline 发送响应作为内联
 func (c *context) Inline(file string, name string) error {
-	c.Response().Header().Set("Content-Disposition", `inline; filename="`+name+`"`)
+	c.Response().Header().Set("Content-Disposition", contentDisposition("inline", name))
 	http.ServeFile(c.Response(), c.Request(), file)
 	return nil
 }
 
 // SSEvent 发送 Server-Sent Event
 func (c *context) SSEvent(name string, message any) {
-	c.Render(-1, sse.Event{
+	c.Render(-1, render.SSEvent{
 		Event: name,
 		Data:  message,
 	})
@@ -1123,7 +1301,7 @@ func (c *context) SSEvent(name string, message any) {
 // Stream 发送流式响应
 func (c *context) Stream(step func(w io.Writer) bool) bool {
 	w := c.Response()
-	clientGone := c.Request().Context().Done()
+	clientGone := c.Done()
 	for {
 		select {
 		case <-clientGone:
@@ -1190,21 +1368,24 @@ func (c *context) NegotiateFormat(offered ...string) string {
 	}
 	for _, accepted := range c.Accepted {
 		for _, offer := range offered {
-			i := 0
-			for ; i < len(accepted) && i < len(offer); i++ {
-				if accepted[i] == '*' || offer[i] == '*' {
-					return offer
-				}
-				if accepted[i] != offer[i] {
-					break
-				}
-			}
-			if i == len(accepted) {
+			if mediaTypeMatch(accepted, offer) {
 				return offer
 			}
 		}
 	}
 	return ""
+}
+
+// mediaTypeMatch 按 type/subtype 两段分别比较（RFC 9110 §12.5.1）：每段相等（忽略大小写）或任意一方为 *。
+// 不能按字符前缀比较，否则 Accept: application/jso 会匹配到 application/json
+func mediaTypeMatch(accepted, offered string) bool {
+	aType, aSub, _ := strings.Cut(accepted, "/")
+	oType, oSub, _ := strings.Cut(offered, "/")
+	return mediaRangePartMatch(aType, oType) && mediaRangePartMatch(aSub, oSub)
+}
+
+func mediaRangePartMatch(a, b string) bool {
+	return a == "*" || b == "*" || strings.EqualFold(a, b)
 }
 
 // SetAccepted 设置接受的格式
@@ -1224,15 +1405,15 @@ func (c *context) ClientIP() string {
 		}
 	}
 
+	// AppEngine 已废弃（见字段注释），这里只保留兼容逻辑，不再每个请求都打日志
 	if c.engine != nil && c.engine.AppEngine {
-		log.Println(`The AppEngine flag is going to be deprecated. Please check issues #2723 and #2739 and use 'TrustedPlatform: gin.PlatformGoogleAppEngine' instead.`)
 		if addr := c.RequestHeader("X-Appengine-Remote-Addr"); addr != "" {
 			return addr
 		}
 	}
 
-	remoteIP := net.ParseIP(c.RemoteIP())
-	if remoteIP == nil {
+	remoteIP, err := parseAddr(c.RemoteIP())
+	if err != nil {
 		return ""
 	}
 
@@ -1267,38 +1448,31 @@ func (c *context) RemoteIP() string {
 /********* CONTEXT METHODS **********/
 /************************************/
 
-// hasRequestContext 检查是否有请求上下文
-func (c *context) hasRequestContext() bool {
-	hasFallback := c.engine != nil && c.engine.ContextWithFallback
-	hasRequestContext := c.request != nil && c.request.Context() != nil
-	return hasFallback && hasRequestContext
+// requestContext 返回请求的 context；没有请求时（例如测试中手动构造）视为永不取消的空 context。
+// Deadline/Done/Err/Value 全部基于它，客户端断开、服务端超时都能传递给把 c 当作 context.Context 的下游调用
+func (c *context) requestContext() stdctx.Context {
+	if c.request == nil {
+		return stdctx.Background()
+	}
+	return c.request.Context()
 }
 
-// Deadline 返回截止时间
+// Deadline 返回请求 context 的截止时间
 func (c *context) Deadline() (deadline time.Time, ok bool) {
-	if !c.hasRequestContext() {
-		return
-	}
-	return c.request.Context().Deadline()
+	return c.requestContext().Deadline()
 }
 
-// Done 返回完成通道
+// Done 返回请求 context 的完成通道
 func (c *context) Done() <-chan struct{} {
-	if !c.hasRequestContext() {
-		return nil
-	}
-	return c.request.Context().Done()
+	return c.requestContext().Done()
 }
 
-// Err 返回错误
+// Err 返回请求 context 的错误
 func (c *context) Err() error {
-	if !c.hasRequestContext() {
-		return nil
-	}
-	return c.request.Context().Err()
+	return c.requestContext().Err()
 }
 
-// Value 返回上下文值
+// Value 依次查找：0 → *http.Request，ContextKey → 自身，string 类型的 Keys，最后是请求 context
 func (c *context) Value(key any) any {
 	if key == 0 {
 		return c.request
@@ -1311,10 +1485,7 @@ func (c *context) Value(key any) any {
 			return val
 		}
 	}
-	if !c.hasRequestContext() {
-		return nil
-	}
-	return c.request.Context().Value(key)
+	return c.requestContext().Value(key)
 }
 
 /************************************/

@@ -10,6 +10,9 @@ import (
 	"regexp"
 	"strings"
 	"testing"
+
+	"github.com/stretchr/testify/assert"
+	"github.com/stretchr/testify/require"
 )
 
 // Used as a workaround since we can't compare functions or their addresses
@@ -60,7 +63,9 @@ func checkRequests(t *testing.T, tree *node, requests testRequests, unescapes ..
 			}
 		}
 
-		if value.params != nil {
+		// 只在匹配成功时比较参数：匹配失败时 value.params 里残留的是最后尝试的分支捕获的值，
+		// 没有语义（失败后只会重定向或 404），回溯会尝试更多分支，残留值因此可能不同
+		if value.params != nil && value.handlers != nil {
 			if !reflect.DeepEqual(*value.params, request.ps) {
 				t.Errorf("Params mismatch for route '%s'", request.path)
 			}
@@ -891,16 +896,16 @@ func TestTreeInvalidNodeType(t *testing.T) {
 }
 
 func TestTreeInvalidParamsType(t *testing.T) {
-	tree := &node{}
+	tree := &node{path: "/"}
 	tree.wildChild = true
-	tree.children = append(tree.children, &node{})
-	tree.children[0].nType = 2
+	tree.children = append(tree.children, &node{path: ":id", nType: param, fullPath: "/:id", handlers: fakeHandler("/:id")})
 
-	// set invalid Params type
+	// params 容量为 0（例如服务启动后才注册参数路由，池中旧 context 的预分配不足）：
+	// 不能越界 panic，也不能静默丢掉参数
 	params := make(Params, 0)
-
-	// try to trigger slice bounds out of range with capacity 0
-	tree.getValue("/test", &params, getSkippedNodes(), false)
+	value := tree.getValue("/test", &params, getSkippedNodes(), false)
+	require.NotNil(t, value.params)
+	assert.Equal(t, Params{{Key: "id", Value: "test"}}, *value.params)
 }
 
 func TestTreeWildcardConflictEx(t *testing.T) {
@@ -939,4 +944,33 @@ func TestTreeWildcardConflictEx(t *testing.T) {
 			t.Fatalf("invalid wildcard conflict error (%v)", recv)
 		}
 	}
+}
+
+// 静态节点与参数节点为兄弟时（/users/new 与 /users/:id），大小写修正不能 panic，
+// 且静态节点优先、找不到时回退到参数节点
+func TestTreeFindCaseInsensitivePathStaticAndParamSiblings(t *testing.T) {
+	tree := &node{}
+	for _, route := range []string{"/users/new", "/users/:id", "/users/:id/posts"} {
+		tree.addRoute(route, fakeHandler(route))
+	}
+
+	tests := []struct{ in, out string }{
+		{"/USERS/NEW", "/users/new"},
+		{"/Users/42", "/users/42"},
+		{"/USERS/42/POSTS", "/users/42/posts"},
+	}
+	for _, tt := range tests {
+		out, found := tree.findCaseInsensitivePath(tt.in, true)
+		assert.True(t, found, tt.in)
+		assert.Equal(t, tt.out, string(out), tt.in)
+	}
+}
+
+// methodIndex 的 switch 必须与 standardMethods 的顺序保持一致
+func TestMethodIndexMatchesStandardMethods(t *testing.T) {
+	for i, m := range standardMethods {
+		assert.Equal(t, i, methodIndex(m), m)
+	}
+	assert.Equal(t, -1, methodIndex("PURGE"))
+	assert.Equal(t, -1, methodIndex("get"))
 }

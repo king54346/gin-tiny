@@ -5,8 +5,9 @@
 package ginTiny
 
 import (
+	"errors"
 	"fmt"
-	"gin-tiny/internal/json"
+	"github.com/king54346/gin-tiny/internal/json"
 	"reflect"
 	"strings"
 )
@@ -62,7 +63,9 @@ func (msg *Error) JSON() any {
 			return msg.Meta
 		case reflect.Map:
 			for _, key := range value.MapKeys() {
-				jsonData[key.String()] = value.MapIndex(key).Interface()
+				// 用 fmt.Sprint 转换键：reflect.Value.String() 对非字符串类型只返回 "<int Value>" 这样的描述，
+				// 会导致多个键互相覆盖、数据丢失
+				jsonData[fmt.Sprint(key.Interface())] = value.MapIndex(key).Interface()
 			}
 		default:
 			jsonData["meta"] = msg.Meta
@@ -172,4 +175,17 @@ func (a errorMsgs) String() string {
 		}
 	}
 	return buffer.String()
+}
+
+// asError 从错误链中取出 *Error。
+// Error 的 Error() 方法是值接收者，所以值类型 Error 也实现了 error 接口；
+// 用户写 return gin.Error{...} 时也要识别，否则类型信息丢失（公开错误被当成未知错误返回 500）
+func asError(err error) (*Error, bool) {
+	if e, ok := errors.AsType[*Error](err); ok {
+		return e, true
+	}
+	if e, ok := errors.AsType[Error](err); ok {
+		return &e, true
+	}
+	return nil, false
 }

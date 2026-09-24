@@ -9,7 +9,7 @@ import (
 	"strings"
 	"testing"
 
-	"github.com/gin-contrib/sse"
+	"github.com/king54346/gin-tiny/render"
 	"github.com/stretchr/testify/assert"
 )
 
@@ -239,7 +239,7 @@ func TestMiddlewareWrite(t *testing.T) {
 	router.GET("/", func(c Context) {
 		c.JSON(http.StatusBadRequest, H{"foo": "bar"})
 	}, func(c Context) {
-		c.Render(http.StatusBadRequest, sse.Event{
+		c.Render(http.StatusBadRequest, render.SSEvent{
 			Event: "test",
 			Data:  "message",
 		})
