@@ -1,7 +1,3 @@
-// Copyright 2014 Manu Martinez-Almeida. All rights reserved.
-// Use of this source code is governed by a MIT style
-// license that can be found in the LICENSE file.
-
 package binding
 
 import "net/http"
@@ -78,6 +74,7 @@ var (
 	Uri           = uriBinding{}
 	Header        = headerBinding{}
 	TOML          = tomlBinding{}
+	Plain         = plainBinding{}
 )
 
 // Default returns the appropriate Binding instance based on the HTTP method
@@ -98,6 +95,8 @@ func Default(method, contentType string) Binding {
 		return MsgPack
 	case MIMEYAML:
 		return YAML
+	case MIMEPlain:
+		return Plain
 	case MIMETOML:
 		return TOML
 	case MIMEMultipartPOSTForm:

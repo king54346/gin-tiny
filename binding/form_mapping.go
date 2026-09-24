@@ -1,20 +1,17 @@
-// Copyright 2014 Manu Martinez-Almeida. All rights reserved.
-// Use of this source code is governed by a MIT style
-// license that can be found in the LICENSE file.
-
 package binding
 
 import (
 	"errors"
 	"fmt"
-	"github.com/king54346/gin-tiny/internal/bytesconv"
-	"github.com/king54346/gin-tiny/internal/json"
 	"maps"
 	"reflect"
 	"slices"
 	"strconv"
 	"strings"
 	"time"
+
+	"github.com/king54346/gin-tiny/internal/bytesconv"
+	"github.com/king54346/gin-tiny/internal/json"
 )
 
 var (
@@ -184,6 +181,19 @@ func setByForm(value reflect.Value, field reflect.StructField, form map[string][
 		return false, nil
 	}
 
+	// 类型自身实现了 BindUnmarshaler 时作为整体解析（包括底层是切片的类型，如把 "a,b,c" 解析成集合），
+	// 不再按切片规则逐个元素绑定
+	var val string
+	if !ok {
+		val = opt.defaultValue
+	}
+	if len(vs) > 0 {
+		val = vs[0]
+	}
+	if set, err := trySetCustom(val, value); set {
+		return true, err
+	}
+
 	switch value.Kind() {
 	case reflect.Slice:
 		if !ok {
@@ -199,19 +209,32 @@ func setByForm(value reflect.Value, field reflect.StructField, form map[string][
 		}
 		return true, setArray(vs, value, field)
 	default:
-		var val string
-		if !ok {
-			val = opt.defaultValue
-		}
-
-		if len(vs) > 0 {
-			val = vs[0]
-		}
 		return true, setWithProperType(val, value, field)
 	}
 }
 
+// BindUnmarshaler 由需要自定义解析规则的类型实现，适用于表单、查询参数、路径参数和请求头绑定。
+// 例如让 ?date=2024-01-02 直接绑定到自定义日期类型，或把 "a,b,c" 解析成自定义集合类型
+type BindUnmarshaler interface {
+	// UnmarshalParam 解析单个参数值并赋给接收者
+	UnmarshalParam(param string) error
+}
+
+// trySetCustom 字段类型（的指针）实现了 BindUnmarshaler 时交给它解析，优先于内置的类型转换规则
+func trySetCustom(val string, value reflect.Value) (isSet bool, err error) {
+	if !value.CanAddr() {
+		return false, nil
+	}
+	if u, ok := value.Addr().Interface().(BindUnmarshaler); ok {
+		return true, u.UnmarshalParam(val)
+	}
+	return false, nil
+}
+
 func setWithProperType(val string, value reflect.Value, field reflect.StructField) error {
+	if ok, err := trySetCustom(val, value); ok {
+		return err
+	}
 	switch value.Kind() {
 	case reflect.Int:
 		return setIntField(val, 0, value)

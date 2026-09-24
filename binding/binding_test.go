@@ -1,14 +1,9 @@
-// Copyright 2014 Manu Martinez-Almeida. All rights reserved.
-// Use of this source code is governed by a MIT style
-// license that can be found in the LICENSE file.
-
 package binding
 
 import (
 	"bytes"
 	"encoding/json"
 	"errors"
-	"github.com/king54346/gin-tiny/testdata/protoexample"
 	"io"
 	"mime/multipart"
 	"net/http"
@@ -18,6 +13,8 @@ import (
 	"strings"
 	"testing"
 	"time"
+
+	"github.com/king54346/gin-tiny/testdata/protoexample"
 
 	"github.com/stretchr/testify/assert"
 	"google.golang.org/protobuf/proto"
