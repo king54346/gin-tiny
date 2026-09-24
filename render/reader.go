@@ -21,13 +21,12 @@ type Reader struct {
 // Render (Reader) writes data with custom ContentType and headers.
 func (r Reader) Render(w http.ResponseWriter) (err error) {
 	r.WriteContentType(w)
-	if r.ContentLength >= 0 {
-		if r.Headers == nil {
-			r.Headers = map[string]string{}
-		}
-		r.Headers["Content-Length"] = strconv.FormatInt(r.ContentLength, 10)
-	}
+	// 不能把 Content-Length 写进 r.Headers：那是调用方的 map，常被声明为包级变量在请求间共享，
+	// 并发写入会触发 fatal error: concurrent map writes（recover 无法拦截，整个进程退出）
 	r.writeHeaders(w, r.Headers)
+	if r.ContentLength >= 0 && w.Header().Get("Content-Length") == "" {
+		w.Header().Set("Content-Length", strconv.FormatInt(r.ContentLength, 10))
+	}
 	_, err = io.Copy(w, r.Reader)
 	return
 }

@@ -5,7 +5,7 @@
 package render
 
 import (
-	"gin-tiny/internal/msgpack"
+	"github.com/king54346/gin-tiny/internal/msgpack"
 	"net/http"
 )
 

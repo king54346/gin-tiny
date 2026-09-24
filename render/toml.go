@@ -15,6 +15,11 @@ type TOML struct {
 	Data any
 }
 
+var tomlContentType = []string{MIMEApplicationTomlCharsetUTF8}
+
+// TOMLContentType 保留以兼容上游 gin 的导出名。
+//
+// Deprecated: 渲染使用内部的 tomlContentType，修改此变量不会影响响应头。
 var TOMLContentType = []string{MIMEApplicationTomlCharsetUTF8}
 
 // Render (TOML) marshals the given interface object and writes data with custom ContentType.
@@ -32,5 +37,5 @@ func (r TOML) Render(w http.ResponseWriter) error {
 
 // WriteContentType (TOML) writes TOML ContentType for response.
 func (r TOML) WriteContentType(w http.ResponseWriter) {
-	writeContentType(w, TOMLContentType)
+	writeContentType(w, tomlContentType)
 }

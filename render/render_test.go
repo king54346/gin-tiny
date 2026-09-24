@@ -7,8 +7,8 @@ package render
 import (
 	"encoding/xml"
 	"errors"
-	"gin-tiny/internal/json"
-	testdata "gin-tiny/testdata/protoexample"
+	"github.com/king54346/gin-tiny/internal/json"
+	testdata "github.com/king54346/gin-tiny/testdata/protoexample"
 	"html/template"
 	"net"
 	"net/http"
@@ -29,13 +29,13 @@ func TestRenderJSON(t *testing.T) {
 	}
 
 	(JSON{data}).WriteContentType(w)
-	assert.Equal(t, "application/json; charset=utf-8", w.Header().Get("Content-Type"))
+	assert.Equal(t, MIMEApplicationJSON, w.Header().Get("Content-Type"))
 
 	err := (JSON{data}).Render(w)
 
 	assert.NoError(t, err)
 	assert.Equal(t, "{\"foo\":\"bar\",\"html\":\"\\u003cb\\u003e\"}", w.Body.String())
-	assert.Equal(t, "application/json; charset=utf-8", w.Header().Get("Content-Type"))
+	assert.Equal(t, MIMEApplicationJSON, w.Header().Get("Content-Type"))
 }
 
 func TestRenderJSONError(t *testing.T) {
@@ -57,7 +57,7 @@ func TestRenderIndentedJSON(t *testing.T) {
 
 	assert.NoError(t, err)
 	assert.Equal(t, "{\n    \"bar\": \"foo\",\n    \"foo\": \"bar\"\n}", w.Body.String())
-	assert.Equal(t, "application/json; charset=utf-8", w.Header().Get("Content-Type"))
+	assert.Equal(t, MIMEApplicationJSON, w.Header().Get("Content-Type"))
 }
 
 func TestRenderIndentedJSONPanics(t *testing.T) {
@@ -76,13 +76,13 @@ func TestRenderSecureJSON(t *testing.T) {
 	}
 
 	(SecureJSON{"while(1);", data}).WriteContentType(w1)
-	assert.Equal(t, "application/json; charset=utf-8", w1.Header().Get("Content-Type"))
+	assert.Equal(t, MIMEApplicationJSON, w1.Header().Get("Content-Type"))
 
 	err1 := (SecureJSON{"while(1);", data}).Render(w1)
 
 	assert.NoError(t, err1)
 	assert.Equal(t, "{\"foo\":\"bar\"}", w1.Body.String())
-	assert.Equal(t, "application/json; charset=utf-8", w1.Header().Get("Content-Type"))
+	assert.Equal(t, MIMEApplicationJSON, w1.Header().Get("Content-Type"))
 
 	w2 := httptest.NewRecorder()
 	datas := []map[string]any{{
@@ -94,7 +94,7 @@ func TestRenderSecureJSON(t *testing.T) {
 	err2 := (SecureJSON{"while(1);", datas}).Render(w2)
 	assert.NoError(t, err2)
 	assert.Equal(t, "while(1);[{\"foo\":\"bar\"},{\"bar\":\"foo\"}]", w2.Body.String())
-	assert.Equal(t, "application/json; charset=utf-8", w2.Header().Get("Content-Type"))
+	assert.Equal(t, MIMEApplicationJSON, w2.Header().Get("Content-Type"))
 }
 
 func TestRenderSecureJSONFail(t *testing.T) {
@@ -113,13 +113,13 @@ func TestRenderJsonpJSON(t *testing.T) {
 	}
 
 	(JsonpJSON{"x", data}).WriteContentType(w1)
-	assert.Equal(t, "application/javascript; charset=utf-8", w1.Header().Get("Content-Type"))
+	assert.Equal(t, MIMEApplicationJavaScriptCharsetUTF8, w1.Header().Get("Content-Type"))
 
 	err1 := (JsonpJSON{"x", data}).Render(w1)
 
 	assert.NoError(t, err1)
 	assert.Equal(t, "x({\"foo\":\"bar\"});", w1.Body.String())
-	assert.Equal(t, "application/javascript; charset=utf-8", w1.Header().Get("Content-Type"))
+	assert.Equal(t, MIMEApplicationJavaScriptCharsetUTF8, w1.Header().Get("Content-Type"))
 
 	w2 := httptest.NewRecorder()
 	datas := []map[string]any{{
@@ -131,7 +131,7 @@ func TestRenderJsonpJSON(t *testing.T) {
 	err2 := (JsonpJSON{"x", datas}).Render(w2)
 	assert.NoError(t, err2)
 	assert.Equal(t, "x([{\"foo\":\"bar\"},{\"bar\":\"foo\"}]);", w2.Body.String())
-	assert.Equal(t, "application/javascript; charset=utf-8", w2.Header().Get("Content-Type"))
+	assert.Equal(t, MIMEApplicationJavaScriptCharsetUTF8, w2.Header().Get("Content-Type"))
 }
 
 type errorWriter struct {
@@ -185,13 +185,13 @@ func TestRenderJsonpJSONError2(t *testing.T) {
 		"foo": "bar",
 	}
 	(JsonpJSON{"", data}).WriteContentType(w)
-	assert.Equal(t, "application/javascript; charset=utf-8", w.Header().Get("Content-Type"))
+	assert.Equal(t, MIMEApplicationJavaScriptCharsetUTF8, w.Header().Get("Content-Type"))
 
 	e := (JsonpJSON{"", data}).Render(w)
 	assert.NoError(t, e)
 
 	assert.Equal(t, "{\"foo\":\"bar\"}", w.Body.String())
-	assert.Equal(t, "application/javascript; charset=utf-8", w.Header().Get("Content-Type"))
+	assert.Equal(t, MIMEApplicationJavaScriptCharsetUTF8, w.Header().Get("Content-Type"))
 }
 
 func TestRenderJsonpJSONFail(t *testing.T) {
@@ -241,7 +241,7 @@ func TestRenderPureJSON(t *testing.T) {
 	err := (PureJSON{data}).Render(w)
 	assert.NoError(t, err)
 	assert.Equal(t, "{\"foo\":\"bar\",\"html\":\"<b>\"}\n", w.Body.String())
-	assert.Equal(t, "application/json; charset=utf-8", w.Header().Get("Content-Type"))
+	assert.Equal(t, MIMEApplicationJSON, w.Header().Get("Content-Type"))
 }
 
 type xmlmap map[string]any
@@ -277,12 +277,12 @@ b:
 	d: [3, 4]
 	`
 	(YAML{data}).WriteContentType(w)
-	assert.Equal(t, "application/x-yaml; charset=utf-8", w.Header().Get("Content-Type"))
+	assert.Equal(t, MIMEApplicationYamlCharsetUTF8, w.Header().Get("Content-Type"))
 
 	err := (YAML{data}).Render(w)
 	assert.NoError(t, err)
 	assert.Equal(t, "|4-\n    a : Easy!\n    b:\n    \tc: 2\n    \td: [3, 4]\n    \t\n", w.Body.String())
-	assert.Equal(t, "application/x-yaml; charset=utf-8", w.Header().Get("Content-Type"))
+	assert.Equal(t, MIMEApplicationYamlCharsetUTF8, w.Header().Get("Content-Type"))
 }
 
 type fail struct{}
@@ -305,12 +305,12 @@ func TestRenderTOML(t *testing.T) {
 		"html": "<b>",
 	}
 	(TOML{data}).WriteContentType(w)
-	assert.Equal(t, "application/toml; charset=utf-8", w.Header().Get("Content-Type"))
+	assert.Equal(t, MIMEApplicationTomlCharsetUTF8, w.Header().Get("Content-Type"))
 
 	err := (TOML{data}).Render(w)
 	assert.NoError(t, err)
 	assert.Equal(t, "foo = 'bar'\nhtml = '<b>'\n", w.Body.String())
-	assert.Equal(t, "application/toml; charset=utf-8", w.Header().Get("Content-Type"))
+	assert.Equal(t, MIMEApplicationTomlCharsetUTF8, w.Header().Get("Content-Type"))
 }
 
 func TestRenderTOMLFail(t *testing.T) {
@@ -332,13 +332,13 @@ func TestRenderProtoBuf(t *testing.T) {
 	(ProtoBuf{data}).WriteContentType(w)
 	protoData, err := proto.Marshal(data)
 	assert.NoError(t, err)
-	assert.Equal(t, "application/x-protobuf", w.Header().Get("Content-Type"))
+	assert.Equal(t, MIMEApplicationProtobuf, w.Header().Get("Content-Type"))
 
 	err = (ProtoBuf{data}).Render(w)
 
 	assert.NoError(t, err)
 	assert.Equal(t, string(protoData), w.Body.String())
-	assert.Equal(t, "application/x-protobuf", w.Header().Get("Content-Type"))
+	assert.Equal(t, MIMEApplicationProtobuf, w.Header().Get("Content-Type"))
 }
 
 func TestRenderProtoBufFail(t *testing.T) {
@@ -355,13 +355,13 @@ func TestRenderXML(t *testing.T) {
 	}
 
 	(XML{data}).WriteContentType(w)
-	assert.Equal(t, "application/xml; charset=utf-8", w.Header().Get("Content-Type"))
+	assert.Equal(t, MIMEApplicationXMLCharsetUTF8, w.Header().Get("Content-Type"))
 
 	err := (XML{data}).Render(w)
 
 	assert.NoError(t, err)
 	assert.Equal(t, "<map><foo>bar</foo></map>", w.Body.String())
-	assert.Equal(t, "application/xml; charset=utf-8", w.Header().Get("Content-Type"))
+	assert.Equal(t, MIMEApplicationXMLCharsetUTF8, w.Header().Get("Content-Type"))
 }
 
 func TestRenderRedirect(t *testing.T) {
@@ -425,7 +425,7 @@ func TestRenderString(t *testing.T) {
 		Format: "hello %s %d",
 		Data:   []any{},
 	}).WriteContentType(w)
-	assert.Equal(t, "text/plain; charset=utf-8", w.Header().Get("Content-Type"))
+	assert.Equal(t, MIMETextPlainCharsetUTF8, w.Header().Get("Content-Type"))
 
 	err := (String{
 		Format: "hola %s %d",
@@ -434,7 +434,7 @@ func TestRenderString(t *testing.T) {
 
 	assert.NoError(t, err)
 	assert.Equal(t, "hola manu 2", w.Body.String())
-	assert.Equal(t, "text/plain; charset=utf-8", w.Header().Get("Content-Type"))
+	assert.Equal(t, MIMETextPlainCharsetUTF8, w.Header().Get("Content-Type"))
 }
 
 func TestRenderStringLenZero(t *testing.T) {
@@ -447,7 +447,7 @@ func TestRenderStringLenZero(t *testing.T) {
 
 	assert.NoError(t, err)
 	assert.Equal(t, "hola %s %d", w.Body.String())
-	assert.Equal(t, "text/plain; charset=utf-8", w.Header().Get("Content-Type"))
+	assert.Equal(t, MIMETextPlainCharsetUTF8, w.Header().Get("Content-Type"))
 }
 
 func TestRenderReader(t *testing.T) {
@@ -501,10 +501,10 @@ func TestRenderMsgPack(t *testing.T) {
 		"foo": "bar",
 	}
 	(MsgPack{data}).WriteContentType(w)
-	assert.Equal(t, "application/msgpack; charset=utf-8", w.Header().Get("Content-Type"))
+	assert.Equal(t, MIMEApplicationMsgpack, w.Header().Get("Content-Type"))
 	err := (MsgPack{data}).Render(w)
 	assert.NoError(t, err)
 	assert.Equal(t, "\x81\xa3foo\xa3bar", w.Body.String())
-	assert.Equal(t, "application/msgpack; charset=utf-8", w.Header().Get("Content-Type"))
+	assert.Equal(t, MIMEApplicationMsgpack, w.Header().Get("Content-Type"))
 
 }
