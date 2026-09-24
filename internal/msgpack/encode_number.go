@@ -4,7 +4,7 @@ import (
 	"math"
 	"reflect"
 
-	"gin-tiny/internal/msgpack/msgpcode"
+	"github.com/king54346/gin-tiny/internal/msgpack/msgpcode"
 )
 
 // EncodeUint8 encodes an uint8 in 2 bytes preserving type of the number.

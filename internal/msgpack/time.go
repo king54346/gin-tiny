@@ -6,7 +6,7 @@ import (
 	"reflect"
 	"time"
 
-	"gin-tiny/internal/msgpack/msgpcode"
+	"github.com/king54346/gin-tiny/internal/msgpack/msgpcode"
 )
 
 var timeExtID int8 = -1

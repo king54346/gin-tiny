@@ -30,7 +30,7 @@ func init() {
 		reflect.Func:          encodeUnsupportedValue,
 		reflect.Interface:     encodeInterfaceValue,
 		reflect.Map:           encodeMapValue,
-		reflect.Ptr:           encodeUnsupportedValue,
+		reflect.Pointer:       encodeUnsupportedValue,
 		reflect.Slice:         encodeSliceValue,
 		reflect.String:        encodeStringValue,
 		reflect.Struct:        encodeStructValue,
@@ -50,7 +50,7 @@ func getEncoder(typ reflect.Type) encoderFunc {
 func _getEncoder(typ reflect.Type) encoderFunc {
 	kind := typ.Kind()
 
-	if kind == reflect.Ptr {
+	if kind == reflect.Pointer {
 		if _, ok := typeEncMap.Load(typ.Elem()); ok {
 			return ptrEncoderFunc(typ)
 		}
@@ -70,8 +70,8 @@ func _getEncoder(typ reflect.Type) encoderFunc {
 	}
 
 	// Addressable struct field value.
-	if kind != reflect.Ptr {
-		ptr := reflect.PtrTo(typ)
+	if kind != reflect.Pointer {
+		ptr := reflect.PointerTo(typ)
 		if ptr.Implements(customEncoderType) {
 			return encodeCustomValuePtr
 		}
@@ -91,7 +91,7 @@ func _getEncoder(typ reflect.Type) encoderFunc {
 	}
 
 	switch kind {
-	case reflect.Ptr:
+	case reflect.Pointer:
 		return ptrEncoderFunc(typ)
 	case reflect.Slice:
 		elem := typ.Elem()
@@ -191,7 +191,7 @@ func encodeUnsupportedValue(e *Encoder, v reflect.Value) error {
 
 func nilable(kind reflect.Kind) bool {
 	switch kind {
-	case reflect.Chan, reflect.Func, reflect.Interface, reflect.Map, reflect.Ptr, reflect.Slice:
+	case reflect.Chan, reflect.Func, reflect.Interface, reflect.Map, reflect.Pointer, reflect.Slice:
 		return true
 	}
 	return false

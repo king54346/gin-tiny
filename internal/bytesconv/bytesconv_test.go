@@ -27,7 +27,7 @@ func rawStrToBytes(s string) []byte {
 
 func TestBytesToString(t *testing.T) {
 	data := make([]byte, 1024)
-	for i := 0; i < 100; i++ {
+	for range 100 {
 		rand.Read(data)
 		if rawBytesToStr(data) != BytesToString(data) {
 			t.Fatal("don't match")
@@ -64,7 +64,7 @@ func RandStringBytesMaskImprSrcSB(n int) string {
 }
 
 func TestStringToBytes(t *testing.T) {
-	for i := 0; i < 100; i++ {
+	for range 100 {
 		s := RandStringBytesMaskImprSrcSB(64)
 		if !bytes.Equal(rawStrToBytes(s), StringToBytes(s)) {
 			t.Fatal("don't match")

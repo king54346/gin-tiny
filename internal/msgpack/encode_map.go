@@ -1,7 +1,7 @@
 package msgpack
 
 import (
-	"gin-tiny/internal/msgpack/msgpcode"
+	"github.com/king54346/gin-tiny/internal/msgpack/msgpcode"
 	"math"
 	"reflect"
 	"sort"

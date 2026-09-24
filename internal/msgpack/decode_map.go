@@ -3,19 +3,19 @@ package msgpack
 import (
 	"errors"
 	"fmt"
-	"gin-tiny/internal/msgpack/msgpcode"
+	"github.com/king54346/gin-tiny/internal/msgpack/msgpcode"
 	"reflect"
 )
 
 var errArrayStruct = errors.New("msgpack: number of fields in array-encoded struct has changed")
 
 var (
-	mapStringStringPtrType = reflect.TypeOf((*map[string]string)(nil))
+	mapStringStringPtrType = reflect.TypeFor[*map[string]string]()
 	mapStringStringType    = mapStringStringPtrType.Elem()
 )
 
 var (
-	mapStringInterfacePtrType = reflect.TypeOf((*map[string]any)(nil))
+	mapStringInterfacePtrType = reflect.TypeFor[*map[string]any]()
 	mapStringInterfaceType    = mapStringInterfacePtrType.Elem()
 )
 
@@ -107,7 +107,7 @@ func (d *Decoder) decodeMapStringStringPtr(ptr *map[string]string) error {
 		m = *ptr
 	}
 
-	for i := 0; i < size; i++ {
+	for range size {
 		mk, err := d.DecodeString()
 		if err != nil {
 			return err
@@ -148,7 +148,7 @@ func (d *Decoder) DecodeMap() (map[string]any, error) {
 
 	m := make(map[string]any, min(n, maxMapSize))
 
-	for i := 0; i < n; i++ {
+	for range n {
 		mk, err := d.DecodeString()
 		if err != nil {
 			return nil, err
@@ -175,7 +175,7 @@ func (d *Decoder) DecodeUntypedMap() (map[any]any, error) {
 
 	m := make(map[any]any, min(n, maxMapSize))
 
-	for i := 0; i < n; i++ {
+	for range n {
 		mk, err := d.decodeInterfaceCond()
 		if err != nil {
 			return nil, err
@@ -237,7 +237,7 @@ func (d *Decoder) decodeTypedMapValue(v reflect.Value, n int) error {
 	keyType := typ.Key()
 	valueType := typ.Elem()
 
-	for i := 0; i < n; i++ {
+	for range n {
 		mk := reflect.New(keyType).Elem()
 		if err := d.DecodeValue(mk); err != nil {
 			return err
@@ -259,7 +259,7 @@ func (d *Decoder) skipMap(c byte) error {
 	if err != nil {
 		return err
 	}
-	for i := 0; i < n; i++ {
+	for range n {
 		if err := d.Skip(); err != nil {
 			return err
 		}
@@ -313,7 +313,7 @@ func (d *Decoder) decodeStruct(v reflect.Value, n int) error {
 	}
 
 	fields := structs.Fields(v.Type(), d.structTag)
-	for i := 0; i < n; i++ {
+	for range n {
 		name, err := d.decodeStringTemp()
 		if err != nil {
 			return err

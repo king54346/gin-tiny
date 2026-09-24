@@ -5,7 +5,7 @@ import (
 	"math"
 	"reflect"
 
-	"gin-tiny/internal/msgpack/msgpcode"
+	"github.com/king54346/gin-tiny/internal/msgpack/msgpcode"
 )
 
 func (d *Decoder) skipN(n int) error {

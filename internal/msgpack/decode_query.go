@@ -5,7 +5,7 @@ import (
 	"strconv"
 	"strings"
 
-	"gin-tiny/internal/msgpack/msgpcode"
+	"github.com/king54346/gin-tiny/internal/msgpack/msgpcode"
 )
 
 type queryResult struct {
@@ -76,7 +76,7 @@ func (d *Decoder) queryMapKey(q *queryResult) error {
 		return nil
 	}
 
-	for i := 0; i < n; i++ {
+	for i := range n {
 		key, err := d.decodeStringTemp()
 		if err != nil {
 			return err
@@ -113,7 +113,7 @@ func (d *Decoder) queryArrayIndex(q *queryResult) error {
 		q.hasAsterisk = true
 
 		query := q.query
-		for i := 0; i < n; i++ {
+		for range n {
 			q.query = query
 			if err := d.query(q); err != nil {
 				return err
@@ -129,7 +129,7 @@ func (d *Decoder) queryArrayIndex(q *queryResult) error {
 		return err
 	}
 
-	for i := 0; i < n; i++ {
+	for i := range n {
 		if i == ind {
 			if err := d.query(q); err != nil {
 				return err
@@ -149,7 +149,7 @@ func (d *Decoder) queryArrayIndex(q *queryResult) error {
 }
 
 func (d *Decoder) skipNext(n int) error {
-	for i := 0; i < n; i++ {
+	for range n {
 		if err := d.Skip(); err != nil {
 			return err
 		}

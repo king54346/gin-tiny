@@ -2,7 +2,7 @@ package tagparser
 
 import (
 	"bytes"
-	"gin-tiny/internal/bytesconv"
+	"github.com/king54346/gin-tiny/internal/bytesconv"
 	"strings"
 )
 

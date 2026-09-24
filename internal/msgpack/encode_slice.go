@@ -4,10 +4,10 @@ import (
 	"math"
 	"reflect"
 
-	"gin-tiny/internal/msgpack/msgpcode"
+	"github.com/king54346/gin-tiny/internal/msgpack/msgpcode"
 )
 
-var stringSliceType = reflect.TypeOf(([]string)(nil))
+var stringSliceType = reflect.TypeFor[[]string]()
 
 func encodeStringValue(e *Encoder, v reflect.Value) error {
 	return e.EncodeString(v.String())
@@ -130,7 +130,7 @@ func encodeArrayValue(e *Encoder, v reflect.Value) error {
 	if err := e.EncodeArrayLen(l); err != nil {
 		return err
 	}
-	for i := 0; i < l; i++ {
+	for i := range l {
 		if err := e.EncodeValue(v.Index(i)); err != nil {
 			return err
 		}

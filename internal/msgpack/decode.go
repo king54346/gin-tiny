@@ -8,7 +8,7 @@ import (
 	"reflect"
 	"time"
 
-	"gin-tiny/internal/msgpack/msgpcode"
+	"github.com/king54346/gin-tiny/internal/msgpack/msgpcode"
 )
 
 const (
@@ -266,7 +266,7 @@ func (d *Decoder) Decode(v any) error {
 	if !vv.IsValid() {
 		return errors.New("msgpack: Decode(nil)")
 	}
-	if vv.Kind() != reflect.Ptr {
+	if vv.Kind() != reflect.Pointer {
 		return fmt.Errorf("msgpack: Decode(non-pointer %T)", v)
 	}
 	if vv.IsNil() {
@@ -277,7 +277,7 @@ func (d *Decoder) Decode(v any) error {
 	if vv.Kind() == reflect.Interface {
 		if !vv.IsNil() {
 			vv = vv.Elem()
-			if vv.Kind() != reflect.Ptr {
+			if vv.Kind() != reflect.Pointer {
 				return fmt.Errorf("msgpack: Decode(non-pointer %s)", vv.Type().String())
 			}
 		}
@@ -323,7 +323,7 @@ func (d *Decoder) decodeNilValue(v reflect.Value) error {
 	if v.IsNil() {
 		return err
 	}
-	if v.Kind() == reflect.Ptr {
+	if v.Kind() == reflect.Pointer {
 		v = v.Elem()
 	}
 	v.Set(reflect.Zero(v.Type()))
@@ -651,11 +651,4 @@ func readN(r io.Reader, b []byte, n int) ([]byte, error) {
 	}
 
 	return b, nil
-}
-
-func min(a, b int) int { //nolint:unparam
-	if a <= b {
-		return a
-	}
-	return b
 }

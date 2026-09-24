@@ -3,32 +3,32 @@ package msgpack
 import (
 	"encoding"
 	"fmt"
-	"gin-tiny/internal/msgpack/tagparser"
+	"github.com/king54346/gin-tiny/internal/msgpack/tagparser"
 	"log"
 	"reflect"
 	"sync"
 )
 
-var errorType = reflect.TypeOf((*error)(nil)).Elem()
+var errorType = reflect.TypeFor[error]()
 
 var (
-	customEncoderType = reflect.TypeOf((*CustomEncoder)(nil)).Elem()
-	customDecoderType = reflect.TypeOf((*CustomDecoder)(nil)).Elem()
+	customEncoderType = reflect.TypeFor[CustomEncoder]()
+	customDecoderType = reflect.TypeFor[CustomDecoder]()
 )
 
 var (
-	marshalerType   = reflect.TypeOf((*Marshaler)(nil)).Elem()
-	unmarshalerType = reflect.TypeOf((*Unmarshaler)(nil)).Elem()
+	marshalerType   = reflect.TypeFor[Marshaler]()
+	unmarshalerType = reflect.TypeFor[Unmarshaler]()
 )
 
 var (
-	binaryMarshalerType   = reflect.TypeOf((*encoding.BinaryMarshaler)(nil)).Elem()
-	binaryUnmarshalerType = reflect.TypeOf((*encoding.BinaryUnmarshaler)(nil)).Elem()
+	binaryMarshalerType   = reflect.TypeFor[encoding.BinaryMarshaler]()
+	binaryUnmarshalerType = reflect.TypeFor[encoding.BinaryUnmarshaler]()
 )
 
 var (
-	textMarshalerType   = reflect.TypeOf((*encoding.TextMarshaler)(nil)).Elem()
-	textUnmarshalerType = reflect.TypeOf((*encoding.TextUnmarshaler)(nil)).Elem()
+	textMarshalerType   = reflect.TypeFor[encoding.TextMarshaler]()
+	textUnmarshalerType = reflect.TypeFor[encoding.TextUnmarshaler]()
 )
 
 type (
@@ -171,8 +171,7 @@ func getFields(typ reflect.Type, fallbackTag string) *fields {
 	fs := newFields(typ)
 
 	var omitEmpty bool
-	for i := 0; i < typ.NumField(); i++ {
-		f := typ.Field(i)
+	for f := range typ.Fields() {
 
 		tagStr := f.Tag.Get(defaultStructTag)
 		if tagStr == "" && fallbackTag != "" {
@@ -280,7 +279,7 @@ func shouldInline(fs *fields, typ reflect.Type, f *field, tag string) bool {
 		encoder = f.encoder
 		decoder = f.decoder
 	} else {
-		for typ.Kind() == reflect.Ptr {
+		for typ.Kind() == reflect.Pointer {
 			typ = typ.Elem()
 			encoder = getEncoder(typ)
 			decoder = getDecoder(typ)
@@ -342,7 +341,7 @@ func isEmptyValue(v reflect.Value) bool {
 		return v.Uint() == 0
 	case reflect.Float32, reflect.Float64:
 		return v.Float() == 0
-	case reflect.Ptr:
+	case reflect.Pointer:
 		return v.IsNil()
 	default:
 		return false
@@ -356,7 +355,7 @@ func fieldByIndex(v reflect.Value, index []int) (_ reflect.Value, ok bool) {
 
 	for i, idx := range index {
 		if i > 0 {
-			if v.Kind() == reflect.Ptr {
+			if v.Kind() == reflect.Pointer {
 				if v.IsNil() {
 					return v, false
 				}
@@ -389,7 +388,7 @@ func fieldByIndexAlloc(v reflect.Value, index []int) reflect.Value {
 }
 
 func indirectNil(v reflect.Value) (reflect.Value, bool) {
-	if v.Kind() == reflect.Ptr {
+	if v.Kind() == reflect.Pointer {
 		if v.IsNil() {
 			if !v.CanSet() {
 				return v, false

@@ -5,7 +5,7 @@ import (
 	"math"
 	"reflect"
 
-	"gin-tiny/internal/msgpack/msgpcode"
+	"github.com/king54346/gin-tiny/internal/msgpack/msgpcode"
 )
 
 type extInfo struct {
@@ -50,7 +50,7 @@ func RegisterExtEncoder(
 	extEncoder := makeExtEncoder(extID, typ, encoder)
 	typeEncMap.Store(extID, typ)
 	typeEncMap.Store(typ, extEncoder)
-	if typ.Kind() == reflect.Ptr {
+	if typ.Kind() == reflect.Pointer {
 		typeEncMap.Store(typ.Elem(), makeExtEncoderAddr(extEncoder))
 	}
 }
@@ -63,7 +63,7 @@ func unregisterExtEncoder(extID int8) {
 	typeEncMap.Delete(extID)
 	typ := t.(reflect.Type)
 	typeEncMap.Delete(typ)
-	if typ.Kind() == reflect.Ptr {
+	if typ.Kind() == reflect.Pointer {
 		typeEncMap.Delete(typ.Elem())
 	}
 }
@@ -73,7 +73,7 @@ func makeExtEncoder(
 	typ reflect.Type,
 	encoder func(enc *Encoder, v reflect.Value) ([]byte, error),
 ) encoderFunc {
-	nilable := typ.Kind() == reflect.Ptr
+	nilable := typ.Kind() == reflect.Pointer
 
 	return func(e *Encoder, v reflect.Value) error {
 		if nilable && v.IsNil() {
@@ -118,7 +118,7 @@ func RegisterExtDecoder(
 
 	typeDecMap.Store(extID, typ)
 	typeDecMap.Store(typ, extDecoder)
-	if typ.Kind() == reflect.Ptr {
+	if typ.Kind() == reflect.Pointer {
 		typeDecMap.Store(typ.Elem(), makeExtDecoderAddr(extDecoder))
 	}
 }
@@ -132,7 +132,7 @@ func unregisterExtDecoder(extID int8) {
 	delete(extTypes, extID)
 	typ := t.(reflect.Type)
 	typeDecMap.Delete(typ)
-	if typ.Kind() == reflect.Ptr {
+	if typ.Kind() == reflect.Pointer {
 		typeDecMap.Delete(typ.Elem())
 	}
 }

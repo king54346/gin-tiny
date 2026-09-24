@@ -2,8 +2,8 @@ package msgpack
 
 import (
 	"fmt"
-	"gin-tiny/internal/bytesconv"
-	"gin-tiny/internal/msgpack/msgpcode"
+	"github.com/king54346/gin-tiny/internal/bytesconv"
+	"github.com/king54346/gin-tiny/internal/msgpack/msgpcode"
 	"reflect"
 )
 

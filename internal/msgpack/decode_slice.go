@@ -4,10 +4,10 @@ import (
 	"fmt"
 	"reflect"
 
-	"gin-tiny/internal/msgpack/msgpcode"
+	"github.com/king54346/gin-tiny/internal/msgpack/msgpcode"
 )
 
-var sliceStringPtrType = reflect.TypeOf((*[]string)(nil))
+var sliceStringPtrType = reflect.TypeFor[*[]string]()
 
 // DecodeArrayLen decodes array length. Length is -1 when array is nil.
 func (d *Decoder) DecodeArrayLen() (int, error) {
@@ -50,7 +50,7 @@ func (d *Decoder) decodeStringSlicePtr(ptr *[]string) error {
 	}
 
 	ss := makeStrings(*ptr, n)
-	for i := 0; i < n; i++ {
+	for range n {
 		s, err := d.DecodeString()
 		if err != nil {
 			return err
@@ -101,7 +101,7 @@ func decodeSliceValue(d *Decoder, v reflect.Value) error {
 		v.Set(v.Slice(0, v.Cap()))
 	}
 
-	for i := 0; i < n; i++ {
+	for i := range n {
 		if i >= v.Len() {
 			v.Set(growSliceValue(v, n))
 		}
@@ -115,10 +115,7 @@ func decodeSliceValue(d *Decoder, v reflect.Value) error {
 }
 
 func growSliceValue(v reflect.Value, n int) reflect.Value {
-	diff := n - v.Len()
-	if diff > sliceAllocLimit {
-		diff = sliceAllocLimit
-	}
+	diff := min(n-v.Len(), sliceAllocLimit)
 	v = reflect.AppendSlice(v, reflect.MakeSlice(v.Type(), diff, diff))
 	return v
 }
@@ -136,7 +133,7 @@ func decodeArrayValue(d *Decoder, v reflect.Value) error {
 		return fmt.Errorf("%s len is %d, but msgpack has %d elements", v.Type(), v.Len(), n)
 	}
 
-	for i := 0; i < n; i++ {
+	for i := range n {
 		sv := v.Index(i)
 		if err := d.DecodeValue(sv); err != nil {
 			return err
@@ -164,7 +161,7 @@ func (d *Decoder) decodeSlice(c byte) ([]any, error) {
 	}
 
 	s := make([]any, 0, min(n, sliceAllocLimit))
-	for i := 0; i < n; i++ {
+	for range n {
 		v, err := d.decodeInterfaceCond()
 		if err != nil {
 			return nil, err
@@ -181,7 +178,7 @@ func (d *Decoder) skipSlice(c byte) error {
 		return err
 	}
 
-	for i := 0; i < n; i++ {
+	for range n {
 		if err := d.Skip(); err != nil {
 			return err
 		}
