@@ -8,7 +8,7 @@ package binding
 
 import (
 	"bytes"
-	"gin-tiny/internal/msgpack"
+	"github.com/king54346/gin-tiny/internal/msgpack"
 	"io"
 	"net/http"
 )
@@ -28,7 +28,7 @@ func (msgpackBinding) BindBody(body []byte, obj any) error {
 }
 
 func decodeMsgPack(r io.Reader, obj any) error {
-	if err := msgpack.NewDecoder(r).Decode(&obj); err != nil {
+	if err := msgpack.NewDecoder(r).Decode(obj); err != nil {
 		return err
 	}
 	return validate(obj)

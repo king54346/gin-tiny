@@ -8,7 +8,7 @@ import (
 	"bytes"
 	"encoding/json"
 	"errors"
-	"gin-tiny/testdata/protoexample"
+	"github.com/king54346/gin-tiny/testdata/protoexample"
 	"io"
 	"mime/multipart"
 	"net/http"
@@ -707,7 +707,7 @@ func TestBindingFormMultipartForMapFail(t *testing.T) {
 
 func TestBindingProtoBuf(t *testing.T) {
 	test := &protoexample.Test{
-		Label: proto.String("yes"),
+		Label: new("yes"),
 	}
 	data, _ := proto.Marshal(test)
 
@@ -719,7 +719,7 @@ func TestBindingProtoBuf(t *testing.T) {
 
 func TestBindingProtoBufFail(t *testing.T) {
 	test := &protoexample.Test{
-		Label: proto.String("yes"),
+		Label: new("yes"),
 	}
 	data, _ := proto.Marshal(test)
 

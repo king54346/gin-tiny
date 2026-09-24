@@ -8,7 +8,7 @@ package binding
 
 import (
 	"bytes"
-	"gin-tiny/internal/msgpack"
+	"github.com/king54346/gin-tiny/internal/msgpack"
 	"testing"
 
 	"github.com/stretchr/testify/assert"

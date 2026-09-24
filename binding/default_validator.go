@@ -53,15 +53,22 @@ func (v *defaultValidator) ValidateStruct(obj any) error {
 
 	value := reflect.ValueOf(obj)
 	switch value.Kind() {
-	case reflect.Ptr:
+	case reflect.Pointer:
+		// nil 指针（例如 []*T 中的 nil 元素）没有可校验的内容；不判断的话 Elem().Interface() 会 panic
+		if value.IsNil() {
+			return nil
+		}
 		return v.ValidateStruct(value.Elem().Interface())
 	case reflect.Struct:
 		return v.validateStruct(obj)
 	case reflect.Slice, reflect.Array:
 		count := value.Len()
-		validateRet := make(SliceValidationError, 0)
-		for i := 0; i < count; i++ {
+		var validateRet SliceValidationError
+		for i := range count {
 			if err := v.ValidateStruct(value.Index(i).Interface()); err != nil {
+				if validateRet == nil {
+					validateRet = make(SliceValidationError, 0, count)
+				}
 				validateRet = append(validateRet, err)
 			}
 		}

@@ -7,7 +7,7 @@ package binding
 import (
 	"bytes"
 	"errors"
-	"gin-tiny/internal/json"
+	"github.com/king54346/gin-tiny/internal/json"
 	"io"
 	"net/http"
 )

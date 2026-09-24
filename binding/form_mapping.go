@@ -7,9 +7,11 @@ package binding
 import (
 	"errors"
 	"fmt"
-	"gin-tiny/internal/bytesconv"
-	"gin-tiny/internal/json"
+	"github.com/king54346/gin-tiny/internal/bytesconv"
+	"github.com/king54346/gin-tiny/internal/json"
+	"maps"
 	"reflect"
+	"slices"
 	"strconv"
 	"strings"
 	"time"
@@ -43,7 +45,7 @@ func mapFormByTag(ptr any, form map[string][]string, tag string) error {
 	// Check if ptr is a map
 	ptrVal := reflect.ValueOf(ptr)
 	var pointed any
-	if ptrVal.Kind() == reflect.Ptr {
+	if ptrVal.Kind() == reflect.Pointer {
 		ptrVal = ptrVal.Elem()
 		pointed = ptrVal.Interface()
 	}
@@ -78,20 +80,33 @@ func mappingByPtr(ptr any, setter setter, tag string) error {
 }
 
 func mapping(value reflect.Value, field reflect.StructField, setter setter, tag string) (bool, error) {
+	return mappingRec(value, field, setter, tag, nil)
+}
+
+// mappingRec 是 mapping 的递归实现。creating 记录当前递归链上「为 nil 指针新建值」的类型：
+// 自引用结构体（如 type Node struct{ Next *Node }）每层都会新建一个值再递归进去，
+// 不加限制会无限递归直到栈溢出（fatal error，recover 无法拦截，整个进程退出）。
+// 表单键是扁平的，同一类型在同一条链上第二次新建只会重复映射同样的键，没有意义，直接停止
+func mappingRec(value reflect.Value, field reflect.StructField, setter setter, tag string, creating []reflect.Type) (bool, error) {
 	if field.Tag.Get(tag) == "-" { // just ignoring this field
 		return false, nil
 	}
 
 	vKind := value.Kind()
 
-	if vKind == reflect.Ptr {
+	if vKind == reflect.Pointer {
 		var isNew bool
 		vPtr := value
 		if value.IsNil() {
+			elem := value.Type().Elem()
+			if slices.Contains(creating, elem) {
+				return false, nil
+			}
+			creating = append(creating[:len(creating):len(creating)], elem)
 			isNew = true
-			vPtr = reflect.New(value.Type().Elem())
+			vPtr = reflect.New(elem)
 		}
-		isSet, err := mapping(vPtr.Elem(), field, setter, tag)
+		isSet, err := mappingRec(vPtr.Elem(), field, setter, tag, creating)
 		if err != nil {
 			return false, err
 		}
@@ -115,12 +130,12 @@ func mapping(value reflect.Value, field reflect.StructField, setter setter, tag 
 		tValue := value.Type()
 
 		var isSet bool
-		for i := 0; i < value.NumField(); i++ {
+		for i := range value.NumField() {
 			sf := tValue.Field(i)
 			if sf.PkgPath != "" && !sf.Anonymous { // unexported
 				continue
 			}
-			ok, err := mapping(value.Field(i), sf, setter, tag)
+			ok, err := mappingRec(value.Field(i), sf, setter, tag, creating)
 			if err != nil {
 				return false, err
 			}
@@ -141,7 +156,7 @@ func tryToSetValue(value reflect.Value, field reflect.StructField, setter setter
 	var setOpt setOptions
 
 	tagValue = field.Tag.Get(tag)
-	tagValue, opts := head(tagValue, ",")
+	tagValue, opts, _ := strings.Cut(tagValue, ",")
 
 	if tagValue == "" { // default value is FieldName
 		tagValue = field.Name
@@ -152,9 +167,9 @@ func tryToSetValue(value reflect.Value, field reflect.StructField, setter setter
 
 	var opt string
 	for len(opts) > 0 {
-		opt, opts = head(opts, ",")
+		opt, opts, _ = strings.Cut(opts, ",")
 
-		if k, v := head(opt, "="); k == "default" {
+		if k, v, _ := strings.Cut(opt, "="); k == "default" {
 			setOpt.isDefaultExists = true
 			setOpt.defaultValue = v
 		}
@@ -367,14 +382,6 @@ func setTimeDuration(val string, value reflect.Value) error {
 	return nil
 }
 
-func head(str, sep string) (head string, tail string) {
-	idx := strings.Index(str, sep)
-	if idx < 0 {
-		return str, ""
-	}
-	return str[:idx], str[idx+len(sep):]
-}
-
 func setFormMap(ptr any, form map[string][]string) error {
 	el := reflect.TypeOf(ptr).Elem()
 
@@ -383,10 +390,7 @@ func setFormMap(ptr any, form map[string][]string) error {
 		if !ok {
 			return ErrConvertMapStringSlice
 		}
-		for k, v := range form {
-			ptrMap[k] = v
-		}
-
+		maps.Copy(ptrMap, form)
 		return nil
 	}
 
@@ -395,7 +399,10 @@ func setFormMap(ptr any, form map[string][]string) error {
 		return ErrConvertToMapString
 	}
 	for k, v := range form {
-		ptrMap[k] = v[len(v)-1] // pick last
+		// 手工构造的 url.Values 可能出现空切片，取最后一个值前要判断
+		if len(v) > 0 {
+			ptrMap[k] = v[len(v)-1] // pick last
+		}
 	}
 
 	return nil
