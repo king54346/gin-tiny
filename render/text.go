@@ -1,13 +1,10 @@
-// Copyright 2014 Manu Martinez-Almeida. All rights reserved.
-// Use of this source code is governed by a MIT style
-// license that can be found in the LICENSE file.
-
 package render
 
 import (
 	"fmt"
-	"github.com/king54346/gin-tiny/internal/bytesconv"
 	"net/http"
+
+	"github.com/king54346/gin-tiny/internal/bytesconv"
 )
 
 // String contains the given interface object slice and its format.

@@ -1,7 +1,3 @@
-// Copyright 2014 Manu Martinez-Almeida. All rights reserved.
-// Use of this source code is governed by a MIT style
-// license that can be found in the LICENSE file.
-
 package render
 
 import "net/http"
@@ -29,6 +25,10 @@ var (
 	_ Render = ProtoBuf{}
 	_ Render = TOML{}
 	_ Render = SSEvent{}
+	_ Render = HTML{}
+
+	_ HTMLRender = HTMLProduction{}
+	_ HTMLRender = HTMLDebug{}
 )
 
 func writeContentType(w http.ResponseWriter, value []string) {

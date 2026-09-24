@@ -1,14 +1,8 @@
-// Copyright 2014 Manu Martinez-Almeida. All rights reserved.
-// Use of this source code is governed by a MIT style
-// license that can be found in the LICENSE file.
-
 package render
 
 import (
 	"encoding/xml"
 	"errors"
-	"github.com/king54346/gin-tiny/internal/json"
-	testdata "github.com/king54346/gin-tiny/testdata/protoexample"
 	"html/template"
 	"net"
 	"net/http"
@@ -16,6 +10,9 @@ import (
 	"strconv"
 	"strings"
 	"testing"
+
+	"github.com/king54346/gin-tiny/internal/json"
+	testdata "github.com/king54346/gin-tiny/testdata/protoexample"
 
 	"github.com/stretchr/testify/assert"
 	"google.golang.org/protobuf/proto"
