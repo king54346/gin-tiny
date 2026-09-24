@@ -1,9 +1,9 @@
 package main
 
 import (
-	gin "gin-tiny"
-	"gin-tiny/middleware/httpsign"
-	"gin-tiny/middleware/httpsign/crypto"
+	gin "github.com/king54346/gin-tiny"
+	"github.com/king54346/gin-tiny/middleware/httpsign"
+	"github.com/king54346/gin-tiny/middleware/httpsign/crypto"
 )
 
 /*
@@ -51,14 +51,14 @@ func main() {
 	r.Run(":8080")
 }
 
-func c(context *gin.context) {
-	context.String(200, "c")
+func c(c gin.Context) {
+	c.String(200, "c")
 }
 
-func b(context *gin.context) {
+func b(c gin.Context) {
 
 }
 
-func a(context *gin.context) {
-	context.String(200, "a")
+func a(c gin.Context) {
+	c.String(200, "a")
 }

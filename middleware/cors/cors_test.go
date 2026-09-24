@@ -2,7 +2,7 @@ package cors
 
 import (
 	"context"
-	gin "gin-tiny"
+	gin "github.com/king54346/gin-tiny"
 	"github.com/stretchr/testify/assert"
 	"net/http"
 	"net/http/httptest"

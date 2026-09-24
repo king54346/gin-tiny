@@ -1,12 +1,12 @@
 package main
 
 import (
-	timeout "gin-tiny/middleware/timeout"
+	timeout "github.com/king54346/gin-tiny/middleware/timeout"
 	"log"
 	"net/http"
 	"time"
 
-	gin "gin-tiny"
+	gin "github.com/king54346/gin-tiny"
 )
 
 func emptySuccessResponse(c *gin.context) {

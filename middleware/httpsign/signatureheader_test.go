@@ -88,13 +88,10 @@ func TestFromSignatureString(t *testing.T) {
 			signature: "70AaN3BDO0XC9QbtgksgCy2jJvmOvshq8VmjSthdXC+sgcgrKrl9WME4DbZv4W7UZKElvCemhDLHQ1Nln9GMkQ==",
 		},
 		{
-			name:      `Authorization Repeated params`,
-			header:    newAuthorizationHeader(`Signature keyId="sample_key_id",algorithm="hmac-sha512",headers="(request-target) date digest",signature="70AaN3BDO0XC9QbtgksgCy2jJvmOvshq8VmjSthdXC+sgcgrKrl9WME4DbZv4W7UZKElvCemhDLHQ1Nln9GMkQ==",keyId="sample_key_id_2"`),
-			err:       nil,
-			keyID:     "sample_key_id_2",
-			algorithm: "hmac-sha512",
-			headers:   []string{"(request-target)", "date", "digest"},
-			signature: "70AaN3BDO0XC9QbtgksgCy2jJvmOvshq8VmjSthdXC+sgcgrKrl9WME4DbZv4W7UZKElvCemhDLHQ1Nln9GMkQ==",
+			name:   `Authorization Repeated params`,
+			header: newAuthorizationHeader(`Signature keyId="sample_key_id",algorithm="hmac-sha512",headers="(request-target) date digest",signature="70AaN3BDO0XC9QbtgksgCy2jJvmOvshq8VmjSthdXC+sgcgrKrl9WME4DbZv4W7UZKElvCemhDLHQ1Nln9GMkQ==",keyId="sample_key_id_2"`),
+			// 重复参数可能被网关和应用解析成不同的值（解析器差异），必须拒绝
+			err: ErrDuplicateParameter,
 		},
 		{
 			name:   `Signature missing keyId`,
@@ -134,13 +131,10 @@ func TestFromSignatureString(t *testing.T) {
 			signature: "70AaN3BDO0XC9QbtgksgCy2jJvmOvshq8VmjSthdXC+sgcgrKrl9WME4DbZv4W7UZKElvCemhDLHQ1Nln9GMkQ==",
 		},
 		{
-			name:      `Repeated params`,
-			header:    newSignatureHeader(`keyId="sample_key_id",algorithm="hmac-sha512",headers="(request-target) date digest",signature="70AaN3BDO0XC9QbtgksgCy2jJvmOvshq8VmjSthdXC+sgcgrKrl9WME4DbZv4W7UZKElvCemhDLHQ1Nln9GMkQ==",keyId="sample_key_id_2"`),
-			err:       nil,
-			keyID:     "sample_key_id_2",
-			algorithm: "hmac-sha512",
-			headers:   []string{"(request-target)", "date", "digest"},
-			signature: "70AaN3BDO0XC9QbtgksgCy2jJvmOvshq8VmjSthdXC+sgcgrKrl9WME4DbZv4W7UZKElvCemhDLHQ1Nln9GMkQ==",
+			name:   `Repeated params`,
+			header: newSignatureHeader(`keyId="sample_key_id",algorithm="hmac-sha512",headers="(request-target) date digest",signature="70AaN3BDO0XC9QbtgksgCy2jJvmOvshq8VmjSthdXC+sgcgrKrl9WME4DbZv4W7UZKElvCemhDLHQ1Nln9GMkQ==",keyId="sample_key_id_2"`),
+			// 重复参数可能被网关和应用解析成不同的值（解析器差异），必须拒绝
+			err: ErrDuplicateParameter,
 		},
 	}
 

@@ -1,56 +1,22 @@
 package crypto
 
-import (
-	"crypto/hmac"
-	"golang.org/x/crypto/sha3"
-	"hash"
-)
+import "crypto/sha3"
 
 const algoHmacShake128 = "hmac-shake128"
 
-// HmacShake128 signing algorithm using hmac and sha128
+// HmacShake128 signing algorithm using hmac and shake128（输出 16 字节）
+//
+// 警告：非标准实现，HMAC 块大小为 128 字节（SHAKE128 标准为 168），产出的 MAC 与其他 HMAC-SHAKE128 实现不一致，
+// 只能在客户端与服务端都使用本框架时使用。新项目请使用 HmacSha256 / HmacSha512
 type HmacShake128 struct{}
 
-type shake128Wrapper struct {
-	shake sha3.ShakeHash
-}
-
-func newHmacShake128() hash.Hash {
-	return &shake128Wrapper{shake: sha3.NewShake128()}
-}
-
-func (s *shake128Wrapper) Write(p []byte) (n int, err error) {
-	return s.shake.Write(p)
-}
-
-func (s *shake128Wrapper) Sum(b []byte) []byte {
-	// 你需要决定一个固定的输出长度，这里我们选择32字节，类似于SHA-256
-	sum := make([]byte, 16)
-
-	s.shake.Read(sum)
-	return append(b, sum...)
-}
-
-func (s *shake128Wrapper) Reset() {
-	s.shake.Reset()
-}
-
-func (s *shake128Wrapper) Size() int {
-	return 16
-}
-
-func (s *shake128Wrapper) BlockSize() int {
-	// SHAKE128 的块大小是 128 字节
-	return 128
-}
+// 注意：SHAKE128 的标准块大小（rate）是 168 字节，这里沿用原实现的 128 以保证已有签名结果不变。
+// 因此本算法产出的 MAC 与其他 HMAC-SHAKE128 实现不兼容，只能在本框架的客户端与服务端之间使用
+var newHmacShake128 = newShakeHash(sha3.NewSHAKE128, 16, 128)
 
 // Sign return signing of input msg with secret string
 func (h *HmacShake128) Sign(msg string, secret string) ([]byte, error) {
-	mac := hmac.New(newHmacShake128, []byte(secret))
-	if _, err := mac.Write([]byte(msg)); err != nil {
-		return nil, err
-	}
-	return mac.Sum(nil), nil
+	return sign(newHmacShake128, msg, secret)
 }
 
 // Name return name of algorithm

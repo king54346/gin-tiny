@@ -69,18 +69,15 @@ func parseSignatureString(s string) (*SignatureHeader, error) {
 }
 
 func getSignatureString(r *http.Request) (string, error) {
-	s := r.Header.Get(signatureHeader)
-	if s != "" {
+	if s := r.Header.Get(signatureHeader); s != "" {
 		return s, nil
 	}
-
-	s = r.Header.Get(authorizationHeader)
-	if s != "" {
-		if strings.Index(s, authorizationHeaderInitString) != 0 {
+	if s := r.Header.Get(authorizationHeader); s != "" {
+		sig, ok := strings.CutPrefix(s, authorizationHeaderInitString)
+		if !ok {
 			return "", ErrInvalidAuthorizationHeader
 		}
-		return strings.TrimPrefix(s, authorizationHeaderInitString), nil
+		return sig, nil
 	}
-
 	return "", ErrNoSignature
 }

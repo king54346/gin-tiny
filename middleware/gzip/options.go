@@ -2,9 +2,12 @@ package gzip
 
 import (
 	"compress/gzip"
-	gin "gin-tiny"
+	"errors"
+	gin "github.com/king54346/gin-tiny"
+	"io"
 	"net/http"
 	"regexp"
+	"slices"
 	"strings"
 )
 
@@ -73,12 +76,7 @@ func NewExcludedPaths(paths []string) ExcludedPaths {
 }
 
 func (e ExcludedPaths) Contains(requestURI string) bool {
-	for _, path := range e {
-		if strings.HasPrefix(requestURI, path) {
-			return true
-		}
-	}
-	return false
+	return slices.ContainsFunc(e, func(path string) bool { return strings.HasPrefix(requestURI, path) })
 }
 
 type ExcludedPathesRegexs []*regexp.Regexp
@@ -92,24 +90,50 @@ func NewExcludedPathesRegexs(regexs []string) ExcludedPathesRegexs {
 }
 
 func (e ExcludedPathesRegexs) Contains(requestURI string) bool {
-	for _, reg := range e {
-		if reg.MatchString(requestURI) {
-			return true
-		}
-	}
-	return false
+	return slices.ContainsFunc(e, func(reg *regexp.Regexp) bool { return reg.MatchString(requestURI) })
 }
 
+// DefaultDecompressHandle 解压 Content-Encoding: gzip 的请求体，解压后大小不设上限。
+// 面向不可信客户端时应改用 DecompressHandleWithLimit，防止很小的 gzip 数据解压出巨量内容（gzip 炸弹）
 func DefaultDecompressHandle(c gin.Context) {
-	if c.Request().Body == nil {
+	decompressRequest(c, 0)
+}
+
+// DecompressHandleWithLimit 与 DefaultDecompressHandle 相同，但解压后超过 maxSize 字节时读取请求体会返回错误
+func DecompressHandleWithLimit(maxSize int64) func(c gin.Context) {
+	return func(c gin.Context) { decompressRequest(c, maxSize) }
+}
+
+func decompressRequest(c gin.Context, maxSize int64) {
+	req := c.Request()
+	if req.Body == nil || req.Body == http.NoBody {
 		return
 	}
-	r, err := gzip.NewReader(c.Request().Body)
+	gz, err := gzip.NewReader(req.Body)
 	if err != nil {
 		_ = c.AbortWithError(http.StatusBadRequest, err)
 		return
 	}
-	c.Request().Header.Del("Content-Encoding")
-	c.Request().Header.Del("Content-Length")
-	c.Request().Body = r
+	req.Header.Del("Content-Encoding")
+	req.Header.Del("Content-Length")
+	// 解压后的长度未知
+	req.ContentLength = -1
+
+	var body io.ReadCloser = &gzipRequestBody{gz: gz, orig: req.Body}
+	if maxSize > 0 {
+		body = http.MaxBytesReader(c.Response(), body, maxSize)
+	}
+	req.Body = body
+}
+
+// gzipRequestBody 关闭时同时关闭 gzip reader 和原始请求体
+type gzipRequestBody struct {
+	gz   *gzip.Reader
+	orig io.ReadCloser
+}
+
+func (b *gzipRequestBody) Read(p []byte) (int, error) { return b.gz.Read(p) }
+
+func (b *gzipRequestBody) Close() error {
+	return errors.Join(b.gz.Close(), b.orig.Close())
 }

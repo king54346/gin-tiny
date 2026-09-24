@@ -1,6 +1,6 @@
 package httpsign
 
-import "gin-tiny/middleware/httpsign/crypto"
+import "github.com/king54346/gin-tiny/middleware/httpsign/crypto"
 
 // KeyID 选择哪一个算法
 type KeyID string

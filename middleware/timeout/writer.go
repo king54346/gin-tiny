@@ -6,7 +6,7 @@ import (
 	"net/http"
 	"sync"
 
-	gin "gin-tiny"
+	gin "github.com/king54346/gin-tiny"
 )
 
 // Writer is a writer with memory buffer
@@ -26,27 +26,27 @@ func NewWriter(w gin.ResponseWriter, buf *bytes.Buffer) *Writer {
 }
 
 // Write will write data to response body
+// timeout/body 会被超时分支并发修改，必须在锁内判断
 func (w *Writer) Write(data []byte) (int, error) {
-	if w.timeout || w.body == nil {
-		return 0, nil
-	}
-
 	w.mu.Lock()
 	defer w.mu.Unlock()
 
+	if w.timeout || w.body == nil {
+		return 0, nil
+	}
 	return w.body.Write(data)
 }
 
 // WriteHeader will write http status code
 func (w *Writer) WriteHeader(code int) {
 	checkWriteHeaderCode(code)
-	if w.timeout || w.wroteHeaders {
-		return
-	}
 
 	w.mu.Lock()
 	defer w.mu.Unlock()
 
+	if w.timeout || w.wroteHeaders {
+		return
+	}
 	w.writeHeader(code)
 }
 

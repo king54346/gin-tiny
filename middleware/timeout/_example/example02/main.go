@@ -1,13 +1,13 @@
 package main
 
 import (
-	"gin-tiny/middleware/timeout"
+	"github.com/king54346/gin-tiny/middleware/timeout"
 	"log"
 	"log/slog"
 	"net/http"
 	"time"
 
-	gin "gin-tiny"
+	gin "github.com/king54346/gin-tiny"
 )
 
 func testResponse(c *gin.context) {

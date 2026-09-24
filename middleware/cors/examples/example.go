@@ -1,8 +1,8 @@
 package main
 
 import (
-	gin "gin-tiny"
-	"gin-tiny/middleware/cors"
+	gin "github.com/king54346/gin-tiny"
+	"github.com/king54346/gin-tiny/middleware/cors"
 	"time"
 )
 

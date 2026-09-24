@@ -2,8 +2,8 @@ package main
 
 import (
 	"fmt"
-	gin "gin-tiny"
-	"gin-tiny/middleware/gzip"
+	gin "github.com/king54346/gin-tiny"
+	"github.com/king54346/gin-tiny/middleware/gzip"
 	"log"
 	"net/http"
 	"time"
@@ -12,7 +12,7 @@ import (
 func main() {
 	r := gin.Default()
 	r.Use(gzip.Gzip(gzip.DefaultCompression))
-	r.GET("/ping", func(c *gin.context) {
+	r.GET("/ping", func(c gin.Context) {
 		c.String(http.StatusOK, "pong "+fmt.Sprint(time.Now().Unix()))
 	})
 

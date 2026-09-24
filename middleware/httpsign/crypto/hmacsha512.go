@@ -1,9 +1,6 @@
 package crypto
 
-import (
-	"crypto/hmac"
-	"golang.org/x/crypto/sha3"
-)
+import "crypto/sha512"
 
 const algoHmacSha512 = "hmac-sha512"
 
@@ -12,11 +9,7 @@ type HmacSha512 struct{}
 
 // Sign return signing of input msg with secret string
 func (h *HmacSha512) Sign(msg string, secret string) ([]byte, error) {
-	mac := hmac.New(sha3.New512, []byte(secret))
-	if _, err := mac.Write([]byte(msg)); err != nil {
-		return nil, err
-	}
-	return mac.Sum(nil), nil
+	return sign(sha512.New, msg, secret)
 }
 
 // Name return name of algorithm

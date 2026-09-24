@@ -7,18 +7,18 @@ import (
 	"testing"
 	"time"
 
-	gin "gin-tiny"
+	gin "github.com/king54346/gin-tiny"
 	"github.com/stretchr/testify/assert"
 )
 
 func emptySuccessResponse(c gin.Context) {
-	time.Sleep(200 * time.Microsecond)
+	time.Sleep(100 * time.Millisecond)
 	c.String(http.StatusOK, "")
 }
 
 func TestTimeout(t *testing.T) {
 	r := gin.New()
-	r.GET("/", New(WithTimeout(50*time.Microsecond), WithHandler(emptySuccessResponse)))
+	r.GET("/", New(WithTimeout(10*time.Millisecond), WithHandler(emptySuccessResponse)))
 
 	w := httptest.NewRecorder()
 	req, _ := http.NewRequestWithContext(context.Background(), "GET", "/", nil)
@@ -47,7 +47,7 @@ func testResponse(c gin.Context) {
 func TestCustomResponse(t *testing.T) {
 	r := gin.New()
 	r.GET("/", New(
-		WithTimeout(100*time.Microsecond),
+		WithTimeout(10*time.Millisecond),
 		WithHandler(emptySuccessResponse),
 		WithResponse(testResponse),
 	))
@@ -99,4 +99,42 @@ func TestPanic(t *testing.T) {
 
 	assert.Equal(t, http.StatusInternalServerError, w.Code)
 	assert.Equal(t, "", w.Body.String())
+}
+
+func TestTimeoutCancelsHandlerContext(t *testing.T) {
+	done := make(chan error, 1)
+	r := gin.New()
+	r.GET("/", New(
+		WithTimeout(10*time.Millisecond),
+		WithHandler(func(c gin.Context) {
+			<-c.Request().Context().Done()
+			done <- c.Request().Context().Err()
+		}),
+	))
+
+	w := httptest.NewRecorder()
+	req, _ := http.NewRequestWithContext(context.Background(), "GET", "/", nil)
+	r.ServeHTTP(w, req)
+
+	assert.Equal(t, http.StatusRequestTimeout, w.Code)
+	select {
+	case err := <-done:
+		assert.ErrorIs(t, err, context.DeadlineExceeded)
+	case <-time.After(time.Second):
+		t.Fatal("handler was not notified of the timeout")
+	}
+}
+
+func TestStatusOnlyHandler(t *testing.T) {
+	r := gin.New()
+	r.GET("/", New(
+		WithTimeout(time.Second),
+		WithHandler(func(c gin.Context) { c.Status(http.StatusCreated) }),
+	))
+
+	w := httptest.NewRecorder()
+	req, _ := http.NewRequestWithContext(context.Background(), "GET", "/", nil)
+	r.ServeHTTP(w, req)
+
+	assert.Equal(t, http.StatusCreated, w.Code)
 }

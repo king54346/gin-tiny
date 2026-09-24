@@ -3,14 +3,17 @@ package validator
 import (
 	"bytes"
 	"crypto/sha256"
+	"crypto/subtle"
 	"encoding/base64"
 	"errors"
-	"fmt"
 	"io"
 	"net/http"
 
-	gin "gin-tiny"
+	gin "github.com/king54346/gin-tiny"
 )
+
+// DefaultMaxBodySize 是计算摘要时允许读取的最大请求体字节数
+const DefaultMaxBodySize int64 = 10 << 20 // 10 MiB
 
 // ErrInvalidDigest error when sha256 of body do not match with submitted digest
 var ErrInvalidDigest = &gin.Error{
@@ -18,49 +21,61 @@ var ErrInvalidDigest = &gin.Error{
 	Type: gin.ErrorTypePublic,
 }
 
+// ErrBodyTooLarge 请求体超过 DigestValidator.MaxBodySize
+var ErrBodyTooLarge = &gin.Error{
+	Err:  errors.New("request body is too large to verify digest"),
+	Type: gin.ErrorTypePublic,
+}
+
 // DigestValidator checking digest in header match body
-type DigestValidator struct{}
+type DigestValidator struct {
+	// MaxBodySize 为计算摘要而读入内存的请求体上限，<= 0 时使用 DefaultMaxBodySize。
+	// 摘要校验发生在签名校验之前，未认证的客户端也能触发，必须限制读取量
+	MaxBodySize int64
+}
 
 // NewDigestValidator return pointer of new DigestValidator
 func NewDigestValidator() *DigestValidator {
-	return &DigestValidator{}
+	return &DigestValidator{MaxBodySize: DefaultMaxBodySize}
 }
 
 // Validate return error when checking digest match body
 func (v *DigestValidator) Validate(r *http.Request) error {
-	headerDigest := r.Header.Get("digest")
-	digest, err := calculateDigest(r)
+	digest, err := v.calculateDigest(r)
 	if err != nil {
 		return err
 	}
-	if digest != headerDigest {
+	// 与签名校验保持一致，使用常数时间比较
+	if subtle.ConstantTimeCompare([]byte(digest), []byte(r.Header.Get("digest"))) != 1 {
 		return ErrInvalidDigest
 	}
 	return nil
 }
 
-func calculateDigest(r *http.Request) (string, error) {
-	if r.ContentLength == 0 {
+func (v *DigestValidator) calculateDigest(r *http.Request) (string, error) {
+	if r.ContentLength == 0 || r.Body == nil {
 		return "", nil
 	}
-
-	// Create a buffer to store the body
-	buf := new(bytes.Buffer)
-
-	// Create a tee reader that writes to h while reading from r.Body
-	h := sha256.New()
-	//传入一个 Reader 和一个 Writer ，返回一个 teeReader 对象 ，当你读取 teeReader 中的内容时，会无缓冲的将读取内容写入到 Writer 中
-	tee := io.TeeReader(r.Body, h)
-
-	// Copy from the tee reader to the buffer, which stores the body for later use
-	if _, err := io.Copy(buf, tee); err != nil {
-		return "", err
+	limit := v.MaxBodySize
+	if limit <= 0 {
+		limit = DefaultMaxBodySize
+	}
+	if r.ContentLength > limit {
+		return "", ErrBodyTooLarge
 	}
 
-	// 替换请求体和缓冲区以供以后读取
-	r.Body = io.NopCloser(buf)
+	// 多读一个字节用于判断是否超限（ContentLength 为 -1 的分块请求只能这样判断）
+	buf := new(bytes.Buffer)
+	h := sha256.New()
+	n, err := io.Copy(buf, io.TeeReader(io.LimitReader(r.Body, limit+1), h))
+	if err != nil {
+		return "", err
+	}
+	if n > limit {
+		return "", ErrBodyTooLarge
+	}
 
-	// Generate the digest
-	digest := fmt.Sprintf("SHA-256=%s", base64.StdEncoding.EncodeToString(h.Sum(nil)))
-	return digest, nil
+	// 替换请求体，供后续 handler 读取
+	r.Body = io.NopCloser(buf)
+	return "SHA-256=" + base64.StdEncoding.EncodeToString(h.Sum(nil)), nil
 }

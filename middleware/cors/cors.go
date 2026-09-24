@@ -2,9 +2,11 @@ package cors
 
 import (
 	"errors"
-	gin "gin-tiny"
+	"slices"
 	"strings"
 	"time"
+
+	gin "github.com/king54346/gin-tiny"
 )
 
 // Config represents all available options for the middleware.
@@ -70,7 +72,8 @@ func (c *Config) AddExposeHeaders(headers ...string) {
 }
 
 func (c Config) getAllowedSchemas() []string {
-	allowedSchemas := DefaultSchemas
+	// Clone 一份再 append，避免写入全局 DefaultSchemas 的底层数组
+	allowedSchemas := slices.Clone(DefaultSchemas)
 	if c.AllowBrowserExtensions {
 		allowedSchemas = append(allowedSchemas, ExtensionSchemas...)
 	}
@@ -109,36 +112,36 @@ func (c Config) Validate() error {
 	return nil
 }
 
-func (c Config) parseWildcardRules() [][]string {
-	var wRules [][]string
+// wildcardRule 表示一条带单个 * 的来源规则，* 两侧分别为 prefix 和 suffix：
+// "*.example.com" → ("", ".example.com")，"https://example.*" → ("https://example.", "")
+type wildcardRule struct {
+	prefix, suffix string
+}
 
+// match 要求 origin 同时以 prefix 开头、以 suffix 结尾，且两者不能重叠
+func (w wildcardRule) match(origin string) bool {
+	return len(origin) >= len(w.prefix)+len(w.suffix) &&
+		strings.HasPrefix(origin, w.prefix) &&
+		strings.HasSuffix(origin, w.suffix)
+}
+
+func (c Config) parseWildcardRules() []wildcardRule {
 	if !c.AllowWildcard {
-		return wRules
+		return nil
 	}
 
+	var rules []wildcardRule
 	for _, o := range c.AllowOrigins {
-		if !strings.Contains(o, "*") {
+		prefix, suffix, found := strings.Cut(o, "*")
+		if !found {
 			continue
 		}
-
-		if c := strings.Count(o, "*"); c > 1 {
-			panic(errors.New("only one * is allowed").Error())
+		if strings.Contains(suffix, "*") {
+			panic("only one * is allowed")
 		}
-
-		i := strings.Index(o, "*")
-		if i == 0 {
-			wRules = append(wRules, []string{"*", o[1:]})
-			continue
-		}
-		if i == (len(o) - 1) {
-			wRules = append(wRules, []string{o[:i-1], "*"})
-			continue
-		}
-
-		wRules = append(wRules, []string{o[:i], o[i+1:]})
+		rules = append(rules, wildcardRule{prefix: prefix, suffix: suffix})
 	}
-
-	return wRules
+	return rules
 }
 
 // DefaultConfig returns a generic default configuration mapped to localhost.

@@ -2,25 +2,16 @@ package expvar
 
 import (
 	"expvar"
-	"fmt"
-	gin "gin-tiny"
+
+	gin "github.com/king54346/gin-tiny"
 )
 
 // Handler for gin framework
+// 直接复用标准库的 expvar.Handler，输出格式与 /debug/vars 完全一致
 func Handler() gin.HandlerFunc {
+	h := expvar.Handler()
 	return func(c gin.Context) {
-		w := c.Response()
-		c.Header("Content-Type", "application/json; charset=utf-8")
-		_, _ = w.Write([]byte("{\n"))
-		first := true
-		expvar.Do(func(kv expvar.KeyValue) {
-			if !first {
-				_, _ = w.Write([]byte(",\n"))
-			}
-			first = false
-			fmt.Fprintf(w, "%q: %s", kv.Key, kv.Value)
-		})
-		_, _ = w.Write([]byte("\n}\n"))
-		c.AbortWithStatus(200)
+		h.ServeHTTP(c.Response(), c.Request())
+		c.Abort()
 	}
 }

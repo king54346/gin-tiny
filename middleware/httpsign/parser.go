@@ -43,6 +43,10 @@ func (p *parser) nextParam() (string, string, error) {
 		valParsed = false
 	)
 
+	// 参数之间允许有可选空白（RFC 7230 OWS），如 keyId="a", signature="b"
+	for p.ch == ' ' || p.ch == '\t' {
+		p.readChar()
+	}
 	if p.ch == 0 {
 		return "", "", io.EOF
 	}
@@ -104,6 +108,10 @@ func (p *parser) parse() (map[string]string, error) {
 			return params, nil
 		} else if err != nil {
 			return nil, err
+		}
+		// 重复参数（如两个 keyId）会让不同实现取到不同的值，签名协议中必须拒绝，不能静默以后者为准
+		if _, dup := params[key]; dup {
+			return nil, ErrDuplicateParameter
 		}
 		params[key] = val
 	}

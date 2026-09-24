@@ -62,3 +62,67 @@ func TestParser(t *testing.T) {
 		assert.Equal(t, tc.params, results, tc.name)
 	}
 }
+
+func TestParserEdgeCases(t *testing.T) {
+	tests := []struct {
+		name   string
+		input  string
+		params map[string]string
+		err    error
+	}{
+		{
+			name:   "whitespace after comma",
+			input:  "keyId=\"a\", algorithm=\"b\",\tsignature=\"c\"",
+			params: map[string]string{"keyId": "a", "algorithm": "b", "signature": "c"},
+		},
+		{
+			name:   "trailing comma and whitespace",
+			input:  `keyId="a", `,
+			params: map[string]string{"keyId": "a"},
+		},
+		{
+			name:   "quote inside value",
+			input:  `keyId="a"b",signature="c"`,
+			params: map[string]string{"keyId": `a"b`, "signature": "c"},
+		},
+		{
+			name:   "equal sign inside value (base64 padding)",
+			input:  `signature="YWJj=="`,
+			params: map[string]string{"signature": "YWJj=="},
+		},
+		{
+			name:  "quote before equal sign",
+			input: `keyId"a"`,
+			err:   ErrMisingEqualCharacter,
+		},
+		{
+			name:   "empty input",
+			input:  "",
+			params: map[string]string{},
+		},
+	}
+	for _, tc := range tests {
+		results, err := newParser(tc.input).parse()
+		require.Equal(t, tc.err, err, tc.name)
+		if err == nil {
+			assert.Equal(t, tc.params, results, tc.name)
+		}
+	}
+}
+
+func TestParseSignatureStringWithSpaces(t *testing.T) {
+	h, err := parseSignatureString(`keyId="read", algorithm="hmac-sha512", headers="(request-target) date", signature="abc"`)
+	require.NoError(t, err)
+	assert.Equal(t, KeyID("read"), h.keyID)
+	assert.Equal(t, "hmac-sha512", h.algorithm)
+	assert.Equal(t, []string{"(request-target)", "date"}, h.headers)
+	assert.Equal(t, "abc", h.signature)
+}
+
+func TestParserRejectsDuplicateParameters(t *testing.T) {
+	_, err := newParser(`keyId="a",keyId="b",signature="c"`).parse()
+	assert.Equal(t, ErrDuplicateParameter, err)
+
+	_, err = parseSignatureString(`keyId="read", signature="x", signature="y"`)
+	assert.Equal(t, ErrDuplicateParameter, err)
+}

@@ -6,7 +6,7 @@ import (
 	"net/http"
 	"time"
 
-	gin "gin-tiny"
+	gin "github.com/king54346/gin-tiny"
 )
 
 const maxTimeGap = 30 * time.Second // 30 secs

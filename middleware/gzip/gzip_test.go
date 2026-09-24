@@ -5,9 +5,9 @@ import (
 	"compress/gzip"
 	"context"
 	"fmt"
-	gin "gin-tiny"
+	gin "github.com/king54346/gin-tiny"
 	"github.com/stretchr/testify/assert"
-	"io/ioutil"
+	"io"
 	"net/http"
 	"net/http/httptest"
 	"net/http/httputil"
@@ -73,17 +73,15 @@ func TestGzip(t *testing.T) {
 	assert.Equal(t, w.Code, 200)
 	assert.Equal(t, w.Header().Get("Content-Encoding"), "gzip")
 	assert.Equal(t, w.Header().Get("Vary"), "Accept-Encoding")
-	// 断言 Content-Length 不为 0，且与压缩前长度不同。
-	assert.NotEqual(t, w.Header().Get("Content-Length"), "0")
+	// handler 设置的未压缩 Content-Length 必须被删除，压缩后的长度由 net/http 以 chunked 方式处理
+	assert.Equal(t, "", w.Header().Get("Content-Length"))
 	assert.NotEqual(t, w.Body.Len(), 19)
-	// 断言响应体长度与 Content-Length 一致
-	assert.Equal(t, fmt.Sprint(w.Body.Len()), w.Header().Get("Content-Length"))
 	// 用 gzip.NewReader 解压响应体，读取解压后的内容。
 	gr, err := gzip.NewReader(w.Body)
 	assert.NoError(t, err)
 	defer gr.Close()
 
-	body, _ := ioutil.ReadAll(gr)
+	body, _ := io.ReadAll(gr)
 	assert.Equal(t, string(body), testResponse)
 }
 
@@ -179,7 +177,7 @@ func TestGzipWithReverseProxy(t *testing.T) {
 	assert.NoError(t, err)
 	defer gr.Close()
 
-	body, _ := ioutil.ReadAll(gr)
+	body, _ := io.ReadAll(gr)
 	assert.Equal(t, string(body), testReverseResponse)
 }
 
@@ -255,4 +253,47 @@ func TestDecompressGzipWithIncorrectData(t *testing.T) {
 	router.ServeHTTP(w, req)
 
 	assert.Equal(t, http.StatusBadRequest, w.Code)
+}
+
+// 通过真实的 HTTP 连接验证：Content-Length 不能是未压缩长度，否则客户端会读取截断
+func TestGzipRealServer(t *testing.T) {
+	s := httptest.NewServer(newServer())
+	defer s.Close()
+
+	req, _ := http.NewRequestWithContext(context.Background(), "GET", s.URL+"/", nil)
+	req.Header.Set("Accept-Encoding", "gzip")
+	resp, err := http.DefaultTransport.RoundTrip(req)
+	assert.NoError(t, err)
+	defer resp.Body.Close()
+
+	assert.Equal(t, "gzip", resp.Header.Get("Content-Encoding"))
+	gr, err := gzip.NewReader(resp.Body)
+	assert.NoError(t, err)
+	body, err := io.ReadAll(gr)
+	assert.NoError(t, err)
+	assert.Equal(t, testResponse, string(body))
+}
+
+func TestGzipOptionsNotShared(t *testing.T) {
+	_ = Gzip(DefaultCompression, WithExcludedPaths([]string{"/api/"}))
+	assert.Empty(t, DefaultOptions.ExcludedPaths)
+}
+
+func TestGzipWriteString(t *testing.T) {
+	req, _ := http.NewRequestWithContext(context.Background(), "GET", "/", nil)
+	req.Header.Add("Accept-Encoding", "gzip")
+
+	router := gin.New()
+	router.Use(Gzip(DefaultCompression))
+	router.GET("/", func(c gin.Context) {
+		_, _ = io.WriteString(c.Response(), testResponse)
+	})
+
+	w := httptest.NewRecorder()
+	router.ServeHTTP(w, req)
+
+	gr, err := gzip.NewReader(w.Body)
+	assert.NoError(t, err)
+	body, _ := io.ReadAll(gr)
+	assert.Equal(t, testResponse, string(body))
 }

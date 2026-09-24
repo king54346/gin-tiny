@@ -1,9 +1,9 @@
 package cors
 
 import (
-	gin "gin-tiny"
+	gin "github.com/king54346/gin-tiny"
 	"net/http"
-	"strings"
+	"slices"
 )
 
 type cors struct {
@@ -13,7 +13,7 @@ type cors struct {
 	allowOrigins     []string
 	normalHeaders    http.Header
 	preflightHeaders http.Header
-	wildcardOrigins  [][]string
+	wildcardOrigins  []wildcardRule
 }
 
 var (
@@ -91,17 +91,10 @@ func (cors *cors) applyCors(c gin.Context) {
 
 func (cors *cors) validateWildcardOrigin(origin string) bool {
 	for _, w := range cors.wildcardOrigins {
-		if w[0] == "*" && strings.HasSuffix(origin, w[1]) {
-			return true
-		}
-		if w[1] == "*" && strings.HasPrefix(origin, w[0]) {
-			return true
-		}
-		if strings.HasPrefix(origin, w[0]) && strings.HasSuffix(origin, w[1]) {
+		if w.match(origin) {
 			return true
 		}
 	}
-
 	return false
 }
 
@@ -109,10 +102,8 @@ func (cors *cors) validateOrigin(origin string) bool {
 	if cors.allowAllOrigins {
 		return true
 	}
-	for _, value := range cors.allowOrigins {
-		if value == origin {
-			return true
-		}
+	if slices.Contains(cors.allowOrigins, origin) {
+		return true
 	}
 	if len(cors.wildcardOrigins) > 0 && cors.validateWildcardOrigin(origin) {
 		return true
@@ -126,13 +117,15 @@ func (cors *cors) validateOrigin(origin string) bool {
 func (cors *cors) handlePreflight(c gin.Context) {
 	header := c.Response().Header()
 	for key, value := range cors.preflightHeaders {
-		header[key] = value
+		// 复制一份：直接共享配置里的切片，下游对响应头的原地修改会污染之后所有请求
+		header[key] = slices.Clone(value)
 	}
 }
 
 func (cors *cors) handleNormal(c gin.Context) {
 	header := c.Response().Header()
 	for key, value := range cors.normalHeaders {
-		header[key] = value
+		// 复制一份：直接共享配置里的切片，下游对响应头的原地修改会污染之后所有请求
+		header[key] = slices.Clone(value)
 	}
 }
