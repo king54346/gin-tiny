@@ -11,6 +11,7 @@ import (
 )
 
 func TestServer(t *testing.T) {
+	skipUnlessManual(t)
 	lc := &net.ListenConfig{}
 	if lc.MultipathTCP() {
 		panic("MultipathTCP")
@@ -53,6 +54,7 @@ func TestServer(t *testing.T) {
 }
 
 func TestClient(t *testing.T) {
+	skipUnlessManual(t)
 	conn := &net.Dialer{}
 
 	if conn.MultipathTCP() {

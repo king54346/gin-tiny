@@ -3,7 +3,7 @@ package main
 import (
 	"errors"
 	"fmt"
-	gin "gin-tiny"
+	gin "github.com/king54346/gin-tiny"
 	"net/http"
 	"time"
 )

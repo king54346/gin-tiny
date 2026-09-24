@@ -1,7 +1,7 @@
 package main
 
 import (
-	gin "gin-tiny"
+	gin "github.com/king54346/gin-tiny"
 	"log"
 	"net/http"
 	"net/http/httptest"
@@ -46,20 +46,18 @@ func TestGinContextCancel(t *testing.T) {
 			}
 		}()
 	})
-	go func() {
-		err := r.Run(":8080")
-		if err != nil {
-			panic(err)
-		}
-	}()
 
-	res, err := http.Get("http://127.0.0.1:8080/")
+	ginServ := httptest.NewServer(r)
+	defer ginServ.Close()
+
+	res, err := http.Get(ginServ.URL + "/")
 	if err != nil {
-		panic(err)
+		t.Fatal(err)
 	}
+	res.Body.Close()
 
 	if res.StatusCode != http.StatusOK {
-		panic(err)
+		t.Fatalf("unexpected status code %d", res.StatusCode)
 	}
 
 	wg.Wait()

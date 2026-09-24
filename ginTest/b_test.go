@@ -1,12 +1,13 @@
 package main
 
 import (
-	"gin-tiny"
+	ginTiny "github.com/king54346/gin-tiny"
 	"net/http"
 	"testing"
 )
 
 func TestRest(t *testing.T) {
+	skipUnlessManual(t)
 	r := ginTiny.Default()
 	r.GET("/user", func(c ginTiny.Context) {
 		type s struct {
